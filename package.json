@@ -1,0 +1,20 @@
+{
+  "name": "social-issues-app",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "test:db": "pnpm --filter @sia/supabase test",
+    "validate:cases": "pnpm --filter @sia/case-schema validate-cases"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "4.1.11",
+    "tsx": "4.23.15",
+    "@types/node": "22.20.5"
+  }
+}

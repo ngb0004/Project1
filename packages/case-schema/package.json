@@ -1,0 +1,24 @@
+{
+  "name": "@sia/case-schema",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Zod schema, types and validator for case documents (single source of truth).",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "validate-case": "./bin/validate-cases.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "validate-cases": "tsx bin/validate-cases.ts ../../cases"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  }
+}

@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "id": "11111111-1111-4111-8111-111111111111",
+  "slug": "fixture-harbor-bridge",
+  "title": "FIXTURE: The Harbor Bridge Closure",
+  "status": "published",
+  "version": 1,
+  "as_of": "2026-09-30",
+  "question": {
+    "prompt": "How responsible is the city council for the harbor bridge closure?",
+    "scale": {
+      "type": "slider",
+      "min": 0,
+      "max": 100,
+      "left_label": "Not responsible",
+      "right_label": "Fully responsible"
+    }
+  },
+  "starting_facts": [
+    {
+      "id": "f1",
+      "text": "The fictional Harbor Bridge closed to traffic on 2026-08-01 after an inspection report.",
+      "source_ids": ["src-inspection"],
+      "confidence": "established"
+    },
+    {
+      "id": "f2",
+      "text": "The city council controls the bridge maintenance budget.",
+      "source_ids": ["src-charter"],
+      "confidence": "established"
+    }
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "order": 1,
+      "headline": "Inspectors rated the deck 'poor' in 2023.",
+      "body": "A 2023 inspection gave the bridge deck a poor rating. The report recommended repairs within two years. This is a fictional test fixture.",
+      "depth": [
+        {
+          "kind": "document",
+          "id": "d1",
+          "title": "2023 inspection report",
+          "summary": "The report lists cracking in three deck panels and recommends repair.",
+          "source_id": "src-inspection"
+        }
+      ],
+      "favors": "council-responsible",
+      "impact": "high",
+      "source_ids": ["src-inspection"],
+      "confidence": "established",
+      "evidence": [{ "source_id": "src-inspection", "quote": "deck condition: poor" }],
+      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+    },
+    {
+      "id": "s2",
+      "order": 2,
+      "headline": "The council voted twice to delay repair funding.",
+      "body": "Minutes show the council postponed the repair line item in 2024 and 2025. Both votes passed 5 to 4. This is a fictional test fixture.",
+      "depth": [
+        {
+          "kind": "timeline",
+          "id": "t1",
+          "title": "Budget votes",
+          "entries": [
+            { "date": "2024-06", "text": "First postponement vote, 5-4.", "source_ids": ["src-minutes"] },
+            { "date": "2025-06", "text": "Second postponement vote, 5-4.", "source_ids": ["src-minutes"] }
+          ]
+        }
+      ],
+      "favors": "council-responsible",
+      "impact": "medium",
+      "source_ids": ["src-minutes"],
+      "confidence": "established",
+      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+    },
+    {
+      "id": "s3",
+      "order": 3,
+      "headline": "The state cut its bridge grant by 40% in 2024.",
+      "body": "The state transportation agency reduced local bridge grants in 2024. The city's share fell by 40 percent. This is a fictional test fixture.",
+      "depth": [
+        {
+          "kind": "quote",
+          "id": "q1",
+          "text": "We had to choose between the bridge and the school roof.",
+          "speaker": "A council member (fictional)",
+          "source_id": "src-news"
+        }
+      ],
+      "favors": "council-not-responsible",
+      "impact": "high",
+      "source_ids": ["src-state", "src-news"],
+      "confidence": "established",
+      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+    },
+    {
+      "id": "s4",
+      "order": 4,
+      "headline": "A contractor says the 2025 crack was new and sudden.",
+      "body": "The repair contractor told a local paper the crack that forced the closure appeared within weeks. The city engineer has not confirmed this. This is a fictional test fixture.",
+      "depth": [
+        {
+          "kind": "context",
+          "id": "c1",
+          "title": "Why sudden cracks matter",
+          "body": "If the failure was sudden, earlier repairs might not have prevented it.",
+          "source_ids": ["src-news"]
+        }
+      ],
+      "favors": "council-not-responsible",
+      "impact": "medium",
+      "source_ids": ["src-news"],
+      "confidence": "disputed",
+      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+    }
+  ],
+  "sides": [
+    {
+      "id": "council-responsible",
+      "label": "The council is responsible",
+      "steelman": "The council was warned in 2023 and chose to delay repairs twice."
+    },
+    {
+      "id": "council-not-responsible",
+      "label": "The council is not responsible",
+      "steelman": "State cuts forced hard choices, and the failure that closed the bridge may have been sudden."
+    }
+  ],
+  "open_questions": [
+    "Would the 2023 repairs have prevented the 2025 crack?",
+    "What will the state do with next year's grants?"
+  ],
+  "sources": [
+    {
+      "id": "src-inspection",
+      "title": "Harbor Bridge Inspection Report 2023 (fixture)",
+      "publisher": "Fixture City Engineering",
+      "url": "https://example.org/fixtures/harbor/inspection-2023",
+      "date": "2023-05-02",
+      "type": "official",
+      "accessed_at": "2026-09-30T12:00:00Z"
+    },
+    {
+      "id": "src-charter",
+      "title": "Fixture City Charter",
+      "publisher": "Fixture City",
+      "url": "https://example.org/fixtures/harbor/charter",
+      "date": "2019",
+      "type": "primary",
+      "accessed_at": "2026-09-30T12:00:00Z"
+    },
+    {
+      "id": "src-minutes",
+      "title": "Council budget minutes 2024-2025 (fixture)",
+      "publisher": "Fixture City Clerk",
+      "url": "https://example.org/fixtures/harbor/minutes",
+      "date": "2025-06-20",
+      "type": "official",
+      "accessed_at": "2026-09-30T12:00:00Z"
+    },
+    {
+      "id": "src-state",
+      "title": "State bridge grant allocations (fixture)",
+      "publisher": "Fixture State DOT",
+      "url": "https://example.org/fixtures/harbor/state-grants",
+      "date": "2024-01-15",
+      "type": "official",
+      "accessed_at": "2026-09-30T12:00:00Z"
+    },
+    {
+      "id": "src-news",
+      "title": "Contractor: bridge crack appeared suddenly (fixture)",
+      "publisher": "Fixture Gazette",
+      "url": "https://example.org/fixtures/harbor/gazette",
+      "date": "2026-08-03",
+      "type": "news",
+      "accessed_at": "2026-09-30T12:00:00Z"
+    }
+  ]
+}

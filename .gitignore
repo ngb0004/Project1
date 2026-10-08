@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.next/
+.expo/
+web-build/
+coverage/
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+supabase/.temp/
+supabase/.branches/
+.DS_Store
+/out/
+services/pipeline/.runs/

@@ -1,0 +1,25 @@
+{
+  "name": "@sia/supabase",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "supabase start",
+    "stop": "supabase stop",
+    "reset": "supabase db reset",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "staff:create": "tsx scripts/create-staff-user.ts",
+    "import-case": "tsx scripts/import-case.ts"
+  },
+  "dependencies": {
+    "@sia/case-schema": "workspace:*",
+    "@supabase/supabase-js": "2.117.3",
+    "@sia/case-store": "workspace:*"
+  },
+  "devDependencies": {
+    "supabase": "2.120.0",
+    "pg": "8.23.1",
+    "@types/pg": "8.23.1"
+  }
+}

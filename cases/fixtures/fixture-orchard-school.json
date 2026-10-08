@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "id": "22222222-2222-4222-8222-222222222222",
+  "slug": "fixture-orchard-school",
+  "title": "FIXTURE: The Orchard School Lunch Incident",
+  "status": "published",
+  "version": 3,
+  "as_of": "2026-09-15",
+  "content_warning": "This fictional fixture describes a serious allergic reaction involving a child.",
+  "question": {
+    "prompt": "How much of the blame for the incident falls on the school district?",
+    "scale": {
+      "type": "slider",
+      "min": 0,
+      "max": 100,
+      "left_label": "None of it",
+      "right_label": "All of it"
+    }
+  },
+  "starting_facts": [
+    {
+      "id": "base-1",
+      "text": "A student had an allergic reaction at the fictional Orchard School cafeteria in March 2026.",
+      "source_ids": ["src-district-statement"],
+      "confidence": "established"
+    },
+    {
+      "id": "base-2",
+      "text": "The student recovered after treatment at a hospital.",
+      "source_ids": ["src-district-statement"],
+      "confidence": "established"
+    },
+    {
+      "id": "base-3",
+      "text": "The family has filed a civil complaint against the district and the food vendor.",
+      "source_ids": ["src-complaint"],
+      "confidence": "established"
+    }
+  ],
+  "steps": [
+    {
+      "id": "menu-label",
+      "order": 1,
+      "headline": "The menu card did not list peanuts as an ingredient.",
+      "body": "Photos filed with the complaint show the day's menu card. Peanuts are not listed. This is a fictional test fixture.",
+      "depth": [],
+      "favors": "district",
+      "impact": "high",
+      "source_ids": ["src-complaint"],
+      "confidence": "alleged",
+      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+    },
+    {
+      "id": "vendor-change",
+      "order": 2,
+      "headline": "The vendor changed its sauce recipe a week earlier.",
+      "body": "The vendor's own change log shows a new sauce supplier on March 2. The district says it was not told. This is a fictional test fixture.",
+      "depth": [
+        {
+          "kind": "document",
+          "id": "changelog",
+          "title": "Vendor change log",
+          "summary": "Lists a supplier change for the sauce on March 2.",
+          "source_id": "src-vendor-log"
+        }
+      ],
+      "favors": "vendor",
+      "impact": "high",
+      "source_ids": ["src-vendor-log"],
+      "confidence": "established",
+      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+    },
+    {
+      "id": "epipen",
+      "order": 3,
+      "headline": "Staff used an epinephrine pen within four minutes.",
+      "body": "The district's incident log records the time of the first call and the injection. The two are four minutes apart. This is a fictional test fixture.",
+      "depth": [],
+      "favors": "neutral",
+      "impact": "medium",
+      "source_ids": ["src-incident-log"],
+      "confidence": "established",
+      "micro_poll": { "prompt": "Did this move you?", "re_ask_slider": true }
+    },
+    {
+      "id": "training",
+      "order": 4,
+      "headline": "Two of five cafeteria staff had lapsed allergy training.",
+      "body": "State records show two certifications expired in 2025. The district says renewals were scheduled. This is a fictional test fixture.",
+      "depth": [
+        {
+          "kind": "context",
+          "id": "training-rules",
+          "title": "What the state requires",
+          "body": "The fictional state rule requires annual allergy-response training for cafeteria staff.",
+          "source_ids": ["src-state-records"]
+        }
+      ],
+      "favors": "district",
+      "impact": "medium",
+      "source_ids": ["src-state-records"],
+      "confidence": "established",
+      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+    },
+    {
+      "id": "parent-form",
+      "order": 5,
+      "headline": "The allergy form on file was from a previous school year.",
+      "body": "The district says the family's allergy form had not been renewed. The family's lawyer says the district never asked for a new one. This is a fictional test fixture.",
+      "depth": [
+        {
+          "kind": "quote",
+          "id": "lawyer-quote",
+          "text": "Nobody from the school ever asked us to update anything.",
+          "speaker": "Family's lawyer (fictional)",
+          "source_id": "src-news-1"
+        }
+      ],
+      "favors": "family-shared",
+      "impact": "medium",
+      "source_ids": ["src-district-statement", "src-news-1"],
+      "confidence": "disputed",
+      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+    },
+    {
+      "id": "other-districts",
+      "order": 6,
+      "headline": "Neighboring districts require vendors to report recipe changes.",
+      "body": "An education policy group surveyed nearby districts. Four of six require written notice of recipe changes. This is a fictional test fixture.",
+      "depth": [],
+      "favors": "district",
+      "impact": "low",
+      "source_ids": ["src-analysis"],
+      "confidence": "reported",
+      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+    }
+  ],
+  "sides": [
+    { "id": "district", "label": "The district failed", "steelman": "The district let training lapse and had no rule requiring vendors to report recipe changes." },
+    { "id": "vendor", "label": "The vendor failed", "steelman": "The vendor changed an ingredient source without telling anyone." },
+    { "id": "family-shared", "label": "Responsibility is shared", "steelman": "Paperwork gaps on all sides, including the family's, let this happen." }
+  ],
+  "open_questions": [
+    "Did the vendor send any notice that the district did not receive?",
+    "Will the state audit the district's training records?"
+  ],
+  "sources": [
+    { "id": "src-district-statement", "title": "District statement on March incident (fixture)", "publisher": "Fixture School District", "url": "https://example.org/fixtures/orchard/statement", "date": "2026-03-12", "type": "official", "accessed_at": "2026-09-15T09:00:00Z" },
+    { "id": "src-complaint", "title": "Civil complaint (fixture)", "publisher": "Fixture County Court", "url": "https://example.org/fixtures/orchard/complaint", "date": "2026-05-01", "type": "court_record", "accessed_at": "2026-09-15T09:00:00Z", "quote_excerpt": "The menu card provided no warning of peanut content." },
+    { "id": "src-vendor-log", "title": "Vendor recipe change log (fixture)", "publisher": "Fixture Foods Inc", "url": "https://example.org/fixtures/orchard/vendor-log", "date": "2026-03-02", "type": "primary", "accessed_at": "2026-09-15T09:00:00Z" },
+    { "id": "src-incident-log", "title": "District incident log (fixture)", "publisher": "Fixture School District", "url": "https://example.org/fixtures/orchard/incident-log", "date": "2026-03-09", "type": "official", "accessed_at": "2026-09-15T09:00:00Z" },
+    { "id": "src-state-records", "title": "State certification records (fixture)", "publisher": "Fixture State Education Dept", "url": "https://example.org/fixtures/orchard/certs", "date": "2026-04", "type": "official", "accessed_at": "2026-09-15T09:00:00Z" },
+    { "id": "src-news-1", "title": "Family's lawyer speaks (fixture)", "publisher": "Fixture Daily", "url": "https://example.org/fixtures/orchard/news-1", "date": "2026-05-03", "type": "news", "accessed_at": "2026-09-15T09:00:00Z" },
+    { "id": "src-analysis", "title": "How districts handle vendor changes (fixture)", "publisher": "Fixture Policy Institute", "url": "https://example.org/fixtures/orchard/analysis", "date": "2026-06", "type": "analysis", "accessed_at": "2026-09-15T09:00:00Z" }
+  ]
+}

@@ -10,5 +10,5 @@ export { Citations, ConfidenceLabel, SOURCE_TYPE_LABEL } from './Sources';
 export { Body, Button, Choice, Display, Headline, Kicker, Page, Rule, Small, TextLink, Title } from './ui';
 export { colors, fonts, space, type, MAX_WIDTH } from './theme';
 export * from './testIds';
-export type { DiveServices, ShareOutcome, ShareRequest } from './services';
-export { errorMessage, PROCESS_LINE } from './copy';
+export type { DiveProgressStore, DiveServices, ShareOutcome, ShareRequest } from './services';
+export { errorMessage, PROCESS_LINE, type ErrorContext } from './copy';

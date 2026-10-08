@@ -50,19 +50,22 @@ export function formatDate(iso: string, opts: { year?: boolean } = {}): string {
   return withYear ? `${month} ${Number(d)}, ${y}` : `${month} ${Number(d)}`;
 }
 
-/** "Updated Oct 12; 3,104 people saw the earlier version." or null for a first version. */
+/** "Updated Oct 12; 3,104 people saw the earlier version." ("Updated Oct 12." when no one finished it), or null for a first version. */
 export function versionNoteText(note: VersionNote | null | undefined): string | null {
   if (!note || note.earlier_versions.length === 0 || !note.published_at) return null;
+  const updated = `Updated ${formatDate(note.published_at, { year: false })}`;
   const earlier = note.earlier_versions.reduce((a, v) => a + v.completions, 0);
+  if (earlier === 0) return `${updated}.`;
   const people = earlier === 1 ? '1 person' : `${earlier.toLocaleString('en-US')} people`;
   const which = note.earlier_versions.length === 1 ? 'the earlier version' : 'earlier versions';
-  return `Updated ${formatDate(note.published_at, { year: false })}; ${people} saw ${which}.`;
+  return `${updated}; ${people} saw ${which}.`;
 }
 
 /** Flag shown whenever seeded data is part of a crowd result. */
 export function seededNoteText(seededShare: number): string | null {
   if (seededShare <= 0) return null;
-  if (seededShare >= 0.995) return 'Early estimate: these crowd numbers are seeded, not yet from real readers.';
+  // Rounds to 100% even with a handful of real readers in it, so this never claims there are none.
+  if (seededShare >= 0.995) return 'Early estimate: these crowd numbers are seeded until more people finish.';
   return `Includes seeded estimates (${Math.round(seededShare * 100)}% of this crowd) until more people finish.`;
 }
 
@@ -105,7 +108,8 @@ export function shareCardData(doc: PublicCase, reveal: FinalReveal, url: string)
     question: doc.question.prompt,
     leftLabel: doc.question.scale.left_label,
     rightLabel: doc.question.scale.right_label,
-    crowdAfter: reveal.crowd.after_histogram,
+    // With no counted completions the API sends ten zeros; null means there is no crowd to draw.
+    crowdAfter: reveal.crowd.mean_after === null ? null : reveal.crowd.after_histogram,
     seeded: reveal.crowd.seeded_share > 0,
     url,
     headline: shareHeadline(before, reveal.value),

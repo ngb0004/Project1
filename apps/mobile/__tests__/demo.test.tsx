@@ -6,7 +6,9 @@ import { loadFixtures, playThrough } from './playThrough';
 
 /**
  * Demo mode: a JSON array of { doc, seedProfile? } fetched at runtime and played
- * in memory by LocalDiveApi, with seeded crowd numbers flagged as seeded.
+ * in memory by LocalDiveApi, with seeded crowd numbers flagged as seeded. The
+ * docs are public projections: anything fetched lands on the device, so admin
+ * fields must never be in the file in the first place.
  */
 const fixtures = loadFixtures();
 const seedProfile = (stepIds: string[]) => ({
@@ -15,12 +17,15 @@ const seedProfile = (stepIds: string[]) => ({
   steps: Object.fromEntries(stepIds.map((id, i) => [id, { move_share: 0.5, mean_shift: i % 2 ? -10 : 8, spread: 5 }])),
 });
 
-beforeEach(() => {
-  const entries = fixtures.map((doc) => ({ doc, seedProfile: seedProfile(doc.steps.map((s) => s.id)) }));
+const serve = (entries: unknown) => {
   global.fetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => entries })) as unknown as typeof fetch;
+};
+
+beforeEach(() => {
+  serve(fixtures.map((doc) => ({ doc: toPublicCase(doc), seedProfile: seedProfile(doc.steps.map((s) => s.id)) })));
 });
 
-it('loads full case documents but never hands admin-only fields to the UI', async () => {
+it('plays public projections', async () => {
   const api = await loadDemoApi('https://demo.test/cases.json');
   const live = await api.listLiveCases();
   expect(live.map((c) => c.slug).sort()).toEqual(fixtures.map((d) => d.slug).sort());
@@ -29,6 +34,13 @@ it('loads full case documents but never hands admin-only fields to the UI', asyn
     expect(loaded?.doc).toEqual(toPublicCase(doc));
     expect(JSON.stringify(loaded?.doc)).not.toMatch(/"(favors|impact|evidence|review|status)"/);
   }
+});
+
+it('rejects a full case document instead of stripping it on the device', async () => {
+  serve([{ doc: fixtures[0] }]);
+  await expect(loadDemoApi('https://demo.test/cases.json')).rejects.toThrow(
+    new RegExp(`Demo case ${fixtures[0]!.slug} is not a public projection`),
+  );
 });
 
 it.each(fixtures.map((d) => [d.slug, d] as const))('plays %s with seeded crowd data', async (_slug, doc) => {

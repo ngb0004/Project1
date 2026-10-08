@@ -13,18 +13,26 @@ import {
   type SlotKey,
 } from './types';
 
-/** Maps PostgREST errors (custom SQLSTATE PTxxx -> HTTP xxx) to dive error codes. */
+const CUSTOM_CODES: Record<string, DiveErrorCode> = {
+  PT404: 'not_found',
+  PT409: 'out_of_order',
+  PT429: 'rate_limited',
+  PT410: 'gone',
+  PT403: 'forbidden',
+  '42501': 'forbidden', // insufficient_privilege
+};
+
+/**
+ * Maps PostgREST errors (custom SQLSTATE PTxxx -> HTTP xxx) to dive error codes.
+ * Only a failure with no SQLSTATE (the request never got an answer) or one where
+ * PostgREST could not reach the database counts as a network error; anything else
+ * the server refused, such as bad data (class 22) or a broken constraint (class 23),
+ * is `invalid`.
+ */
 function toDiveError(err: { message: string; code?: string }): DiveApiError {
   const code = err.code ?? '';
-  const map: Record<string, DiveErrorCode> = {
-    PT404: 'not_found',
-    PT409: 'out_of_order',
-    PT429: 'rate_limited',
-    PT410: 'gone',
-    PT403: 'forbidden',
-    '22023': 'invalid',
-  };
-  return new DiveApiError(map[code] ?? 'network', err.message);
+  const mapped = CUSTOM_CODES[code] ?? (code === '' || /^PGRST00\d$/.test(code) ? 'network' : 'invalid');
+  return new DiveApiError(mapped, err.message);
 }
 
 async function call<T>(p: PromiseLike<{ data: unknown; error: { message: string; code?: string } | null }>): Promise<T> {

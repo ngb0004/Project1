@@ -18,6 +18,8 @@ export interface SliderProps {
   rightLabel: string;
   accessibilityLabel: string;
   disabled?: boolean;
+  /** The answer is committed: the slider is disabled and says so. */
+  locked?: boolean;
   /** Step for screen-reader increment/decrement and Page Up/Down. Arrow keys move by 1. */
   step?: number;
   testID?: string;
@@ -26,12 +28,18 @@ export interface SliderProps {
 const MIN = 0;
 const MAX = 100;
 const THUMB = 26;
+/** Movement (px) that turns a touch into a drag rather than a tap. */
+const SLOP = 4;
 const clamp = (v: number) => Math.max(MIN, Math.min(MAX, Math.round(v)));
+const horizontal = (g: { dx: number; dy: number }) => Math.abs(g.dx) > Math.abs(g.dy);
 
 /**
- * A 0-100 position slider. Drag (touch, mouse or pen via PanResponder), tap the
- * track, use the arrow keys on the web, or swipe up/down with a screen reader
- * (accessibilityRole="adjustable" with increment/decrement actions).
+ * A 0-100 position slider. Drag sideways (touch, mouse or pen via PanResponder),
+ * tap the track, use the arrow keys on the web, or swipe up/down with a screen
+ * reader (accessibilityRole="adjustable" with increment/decrement actions).
+ *
+ * A touch only sets the value once it is a sideways drag or a tap. A vertical
+ * swipe that starts on the slider leaves it alone and scrolls the page.
  */
 export function Slider({
   value,
@@ -40,16 +48,18 @@ export function Slider({
   rightLabel,
   accessibilityLabel,
   disabled = false,
+  locked = false,
   step = 5,
   testID = testIds.slider,
 }: SliderProps) {
+  const inactive = disabled || locked;
   const [width, setWidth] = useState(0);
   // The pan responder is created once; it reads the latest props through this ref.
-  const latest = useRef({ onChange, disabled, width, value });
+  const latest = useRef({ onChange, inactive, width, value });
   useEffect(() => {
-    latest.current = { onChange, disabled, width, value };
+    latest.current = { onChange, inactive, width, value };
   });
-  const startX = useRef(0);
+  const gesture = useRef({ startX: 0, dragging: false });
 
   const responder = useMemo(() => {
     const emit = (x: number) => {
@@ -62,20 +72,30 @@ export function Slider({
       }
     };
     return PanResponder.create({
-      onStartShouldSetPanResponder: () => !latest.current.disabled,
-      onMoveShouldSetPanResponder: () => !latest.current.disabled,
-      onPanResponderTerminationRequest: () => false,
-      onShouldBlockNativeResponder: () => true,
+      onStartShouldSetPanResponder: () => !latest.current.inactive,
+      onMoveShouldSetPanResponder: (_e, g) => !latest.current.inactive && horizontal(g),
+      // A scroll view may take over a vertical gesture; a sideways drag stays here.
+      onPanResponderTerminationRequest: (_e, g) => !gesture.current.dragging && !horizontal(g),
+      onShouldBlockNativeResponder: () => false,
       onPanResponderGrant: (e) => {
-        startX.current = e.nativeEvent.locationX;
-        emit(startX.current);
+        gesture.current = { startX: e.nativeEvent.locationX, dragging: false };
       },
-      onPanResponderMove: (_e, g) => emit(startX.current + g.dx),
+      onPanResponderMove: (_e, g) => {
+        if (!gesture.current.dragging) {
+          if (Math.abs(g.dx) < SLOP || !horizontal(g)) return;
+          gesture.current.dragging = true;
+        }
+        emit(gesture.current.startX + g.dx);
+      },
+      onPanResponderRelease: (_e, g) => {
+        // A tap (no real movement) sets the value where it landed.
+        if (!gesture.current.dragging && Math.abs(g.dx) < SLOP && Math.abs(g.dy) < SLOP) emit(gesture.current.startX);
+      },
     });
   }, []);
 
   const nudge = (delta: number) => {
-    if (disabled) return;
+    if (inactive) return;
     const next = clamp(value + delta);
     if (next !== value) onChange(next);
   };
@@ -89,7 +109,7 @@ export function Slider({
   const webKeyboard =
     Platform.OS === 'web'
       ? {
-          focusable: !disabled,
+          focusable: !inactive,
           onKeyDown: (e: { key: string; preventDefault: () => void }) => {
             const moves: Record<string, number> = {
               ArrowRight: 1,
@@ -110,12 +130,12 @@ export function Slider({
       : {};
 
   const nearer = value < 50 ? leftLabel : value > 50 ? rightLabel : null;
-  const valueText = nearer ? `${value} of 100, toward ${nearer}` : `${value} of 100, the middle`;
+  const valueText = `${nearer ? `${value} of 100, toward ${nearer}` : `${value} of 100, the middle`}${locked ? ', locked' : ''}`;
   const thumbLeft = width > 0 ? (value / MAX) * (width - THUMB) : 0;
 
   return (
     <View style={styles.wrap}>
-      <Text style={[styles.value, disabled && styles.valueLocked]} testID={testIds.sliderValue}>
+      <Text style={[styles.value, locked && styles.valueLocked]} testID={testIds.sliderValue}>
         {value}
       </Text>
       <View
@@ -123,7 +143,7 @@ export function Slider({
         accessible
         accessibilityRole="adjustable"
         accessibilityLabel={accessibilityLabel}
-        accessibilityState={{ disabled }}
+        aria-disabled={inactive}
         accessibilityValue={{ min: MIN, max: MAX, now: value, text: valueText }}
         aria-valuemin={MIN}
         aria-valuemax={MAX}
@@ -140,7 +160,7 @@ export function Slider({
         <View style={[styles.tick, styles.passThrough, { left: THUMB / 2 }]} />
         <View style={[styles.tick, styles.passThrough, styles.tickMiddle]} />
         <View style={[styles.tick, styles.passThrough, { right: THUMB / 2 }]} />
-        <View style={[styles.thumb, styles.passThrough, disabled && styles.thumbLocked, { left: thumbLeft }]} />
+        <View style={[styles.thumb, styles.passThrough, locked && styles.thumbLocked, { left: thumbLeft }]} />
       </View>
       <View style={styles.labels}>
         <Text style={[type.small, styles.label]}>{leftLabel}</Text>
@@ -165,7 +185,8 @@ const styles = StyleSheet.create({
   touchArea: {
     height: 48,
     justifyContent: 'center',
-    ...(Platform.OS === 'web' ? ({ cursor: 'pointer', userSelect: 'none', touchAction: 'none' } as object) : null),
+    // pan-y: the browser keeps vertical scrolling; sideways drags come to the slider.
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer', userSelect: 'none', touchAction: 'pan-y' } as object) : null),
   },
   track: {
     position: 'absolute',

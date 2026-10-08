@@ -27,7 +27,7 @@ const seedProfile = (doc: Case) => ({
 
 /** Generic reveal copy (dive-ui and dive-engine): none of it may show before a commit. */
 const CROWD_TEXT =
-  /Everyone who reached|readers moved here|held steady|seeded|No readers yet|\d+ readers?\b|You moved from|didn't move you|How readers moved|did not move|Everyone, (before|after)|moved everyone most/;
+  /Everyone who reached|(readers|crowd) moved|held steady|seeded|No readers yet|\d+ readers?\b|You moved from|didn't move you|did not move|Everyone, (before|after)|moved everyone most|went from|stayed at|Your answers, from first/;
 
 /** Every string a reader (or a screen reader) can get from the current tree. */
 function renderedStrings(): string[] {

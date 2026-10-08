@@ -11,8 +11,9 @@ import {
   type StepReveal,
   type VersionNote,
 } from '@sia/dive-engine';
+import { useFocusOnMount } from './a11y';
 import { JourneyChart, ShiftChart, bucketOf } from './charts';
-import { crowdStepDeltaText, finalCrowdSummary, stepCrowdSummary, yourStepDeltaText } from './copy';
+import { crowdStepDeltaText, finalCrowdSummary, journeyLabel, stepCrowdSummary, yourStepDeltaText } from './copy';
 import { useEntrance } from './motion';
 import { testIds } from './testIds';
 import { colors, fonts, space, type } from './theme';
@@ -24,7 +25,6 @@ function RevealFrame({ children, testID }: { children: ReactNode; testID: string
   return (
     <Animated.View
       testID={testID}
-      accessibilityLiveRegion="polite"
       style={[
         styles.frame,
         {
@@ -66,16 +66,38 @@ function CrowdNotes({
   );
 }
 
+/**
+ * The personal mirror, the first line of every reveal. After a commit it takes
+ * focus, so screen readers (and keyboard users) land on the news, not on the
+ * page body where the Lock in button was.
+ */
+function Mirror({ text, focusOnMount }: { text: string; focusOnMount: boolean }) {
+  const ref = useFocusOnMount(focusOnMount);
+  return (
+    <View ref={ref} tabIndex={-1} accessible style={styles.focusTarget}>
+      <Text style={styles.mirror} testID={testIds.mirror}>
+        {text}
+      </Text>
+    </View>
+  );
+}
+
 /** After a step's poll is committed: the personal mirror and how the crowd moved at this step. */
-export function StepRevealView({ reveal, doc }: { reveal: StepReveal; doc: PublicCase }) {
+export function StepRevealView({
+  reveal,
+  doc,
+  focusOnMount = false,
+}: {
+  reveal: StepReveal;
+  doc: PublicCase;
+  focusOnMount?: boolean;
+}) {
   const { left_label: left, right_label: right } = doc.question.scale;
   const { crowd } = reveal;
   const summary = stepCrowdSummary(crowd, left, right);
   return (
     <RevealFrame testID={testIds.reveal}>
-      <Text style={styles.mirror} testID={testIds.mirror}>
-        {mirrorText(reveal.previous_value, reveal.value)}
-      </Text>
+      <Mirror text={mirrorText(reveal.previous_value, reveal.value)} focusOnMount={focusOnMount} />
       <Kicker style={styles.kicker}>Everyone who reached this fact</Kicker>
       {crowd.shift ? (
         <>
@@ -102,7 +124,15 @@ export function StepRevealView({ reveal, doc }: { reveal: StepReveal; doc: Publi
 }
 
 /** The final reveal: the reader's path over the crowd, and the steps that moved each most. */
-export function FinalRevealView({ reveal, doc }: { reveal: FinalReveal; doc: PublicCase }) {
+export function FinalRevealView({
+  reveal,
+  doc,
+  focusOnMount = false,
+}: {
+  reveal: FinalReveal;
+  doc: PublicCase;
+  focusOnMount?: boolean;
+}) {
   const { crowd, you } = reveal;
   const path = you.answers.map((a) => a.value);
   const before = you.answers.find((a) => a.step_id === 'before')?.value ?? path[0] ?? reveal.previous_value;
@@ -119,14 +149,13 @@ export function FinalRevealView({ reveal, doc }: { reveal: FinalReveal; doc: Pub
   const crowdTopStat = crowd.steps.find((s) => s.step_id === crowd.top_step_id);
   const crowdMoved = (crowdTopStat?.mean_abs_delta ?? 0) > 0;
   const crowdTop = crowdMoved && crowd.top_step_id ? stepById(doc, crowd.top_step_id) : undefined;
-  const crowdTopDelta = crowdStepDeltaText(crowdTopStat?.mean_abs_delta ?? null);
+  const crowdTopDelta = crowdStepDeltaText(crowdTopStat?.mean_abs_delta ?? null, crowd.seeded_share);
 
   return (
     <RevealFrame testID={testIds.finalReveal}>
-      <Text style={styles.mirror} testID={testIds.mirror}>
-        {mirrorText(before, reveal.value)}
-      </Text>
+      <Mirror text={mirrorText(before, reveal.value)} focusOnMount={focusOnMount} />
       <JourneyChart
+        accessibilityLabel={journeyLabel(path, crowd)}
         path={path}
         beforeHistogram={hasCrowd ? crowd.before_histogram : null}
         afterHistogram={hasCrowd ? crowd.after_histogram : null}
@@ -177,6 +206,8 @@ const styles = StyleSheet.create({
     borderLeftColor: colors.accent,
   },
   mirror: { fontFamily: fonts.serif, fontSize: 24, lineHeight: 31, color: colors.accent },
+  // Focused by script only; the reveal's own accent rule already marks it.
+  focusTarget: { outlineWidth: 0 },
   kicker: { marginTop: space.sm },
   notes: { gap: 2 },
   seeded: { color: colors.ink },

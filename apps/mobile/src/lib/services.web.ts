@@ -1,8 +1,8 @@
-import * as Clipboard from 'expo-clipboard';
 import { captureRef } from 'react-native-view-shot';
 import type { View } from 'react-native';
 import type { DiveServices } from '@sia/dive-ui';
 import { config } from './config';
+import { progressStore } from './progress';
 
 const FILE_NAME = 'dive-result.png';
 
@@ -32,14 +32,44 @@ function download(dataUri: string) {
 }
 
 /**
+ * Copies text, and says whether it worked. (expo-clipboard's web fallback
+ * reports success even when execCommand('copy') copied nothing.)
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Denied or unavailable: try the older route below.
+  }
+  const field = document.createElement('textarea');
+  field.value = text;
+  field.setAttribute('readonly', '');
+  Object.assign(field.style, { position: 'fixed', top: '0', left: '0', opacity: '0' });
+  document.body.appendChild(field);
+  field.select();
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    field.remove();
+  }
+}
+
+/**
  * Web: the Web Share API when the browser has it (with the card image when it
- * can share files); otherwise copy the link and offer the PNG as a download.
+ * can share files); otherwise copy the link and offer the PNG as a download, or
+ * show the link to copy by hand when the clipboard refuses too.
  */
 export const diveServices: DiveServices = {
   openUrl: (url) => {
     window.open(url, '_blank', 'noopener,noreferrer');
   },
-  copy: (text) => Clipboard.setStringAsync(text).then(() => undefined),
+  copy: copyText,
+  progress: progressStore,
   async share({ card, text, view }) {
     const png = await capturePng(view);
     if (typeof navigator.share === 'function') {
@@ -54,8 +84,8 @@ export const diveServices: DiveServices = {
         // NotAllowedError and friends: fall back to copying the link.
       }
     }
-    await Clipboard.setStringAsync(text);
-    return { status: 'copied', download: png ? () => download(png) : undefined };
+    const downloadPng = png ? () => download(png) : undefined;
+    return (await copyText(text)) ? { status: 'copied', download: downloadPng } : { status: 'manual', download: downloadPng };
   },
 };
 

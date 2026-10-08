@@ -12,6 +12,8 @@ export const testIds = {
   close: 'dive-close',
   done: 'dive-done',
   error: 'dive-error',
+  reload: 'dive-reload',
+  retry: 'dive-retry',
   notice: 'dive-notice',
   progress: 'dive-progress',
 
@@ -65,6 +67,8 @@ export const testIds = {
   shareButton: 'share-button',
   shareStatus: 'share-status',
   shareDownload: 'share-download',
+  shareImage: 'share-image',
+  shareUrl: 'share-url',
   copyLink: 'copy-link',
 
   transparency: 'transparency-page',

@@ -105,6 +105,7 @@ export function Button({
   disabled = false,
   testID,
   accessibilityHint,
+  ref,
 }: {
   label: string;
   onPress: () => void;
@@ -112,10 +113,12 @@ export function Button({
   disabled?: boolean;
   testID?: string;
   accessibilityHint?: string;
+  ref?: Ref<View>;
 }) {
   const primary = variant === 'primary';
   return (
     <Pressable
+      ref={ref}
       onPress={onPress}
       disabled={disabled}
       testID={testID}
@@ -157,7 +160,8 @@ export function TextLink({
       onPress={onPress}
       testID={testID}
       accessibilityRole={accessibilityRole}
-      accessibilityState={expanded === undefined ? undefined : { expanded }}
+      // aria-* rather than accessibilityState: react-native-web only maps these to the DOM.
+      aria-expanded={expanded}
       hitSlop={8}
       style={styles.textLink}
     >
@@ -185,7 +189,7 @@ export function Choice({
       onPress={onPress}
       testID={testID}
       accessibilityRole={kind}
-      accessibilityState={{ checked: selected }}
+      aria-checked={selected}
       style={styles.choice}
     >
       <View style={[styles.choiceMark, kind === 'radio' && styles.choiceMarkRound, selected && styles.choiceMarkOn]} />

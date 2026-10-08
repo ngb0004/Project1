@@ -18,11 +18,18 @@ import {
  */
 export interface FakeApi extends DiveApi {
   calls: { method: keyof DiveApi; args: unknown[] }[];
+  /** Makes the next calls to `method` reject with these errors, in order. */
+  failNext(method: 'submit' | 'getReveal' | 'startSession', ...errors: Error[]): void;
 }
 
 const HISTOGRAM = [0.02, 0.03, 0.05, 0.08, 0.12, 0.15, 0.2, 0.17, 0.12, 0.06];
 const PUBLISHED_AT = '2026-10-01T12:00:00Z';
 
+/**
+ * `docs` are the published versions; the array is read on every call, so a test
+ * can publish (push) or take down (splice) a version mid-dive. The live version
+ * of a slug is its highest.
+ */
 export function createFakeApi(docs: PublicCase[], opts: { versionNote?: Partial<VersionNote> } = {}): FakeApi {
   const sessions = new Map<
     string,
@@ -30,6 +37,12 @@ export function createFakeApi(docs: PublicCase[], opts: { versionNote?: Partial<
   >();
   const calls: FakeApi['calls'] = [];
   const log = (method: keyof DiveApi, ...args: unknown[]) => calls.push({ method, args });
+  const failures: Record<string, Error[]> = {};
+  const maybeFail = (method: string) => {
+    const err = failures[method]?.shift();
+    if (err) throw err;
+  };
+  const liveVersion = (slug: string) => Math.max(...docs.filter((d) => d.slug === slug).map((d) => d.version));
 
   const versionNote = (doc: PublicCase): VersionNote => ({
     version: doc.version,
@@ -111,6 +124,9 @@ export function createFakeApi(docs: PublicCase[], opts: { versionNote?: Partial<
 
   return {
     calls,
+    failNext(method, ...errors) {
+      (failures[method] ??= []).push(...errors);
+    },
     async listLiveCases() {
       log('listLiveCases');
       return docs.map((d) => ({
@@ -126,20 +142,22 @@ export function createFakeApi(docs: PublicCase[], opts: { versionNote?: Partial<
     },
     async getCase(slug, version) {
       log('getCase', slug, version);
-      const doc = docs.find((d) => d.slug === slug && (version === undefined || d.version === version));
+      const wanted = version ?? liveVersion(slug);
+      const doc = docs.find((d) => d.slug === slug && d.version === wanted);
       if (!doc) return null;
       const loaded: LoadedCase = {
         case_id: doc.id,
         slug,
         version: doc.version,
         published_at: PUBLISHED_AT,
-        is_live: true,
+        is_live: doc.version === liveVersion(slug),
         doc,
       };
       return loaded;
     },
     async startSession(caseId, version, deviceId): Promise<SessionStart> {
       log('startSession', caseId, version, deviceId);
+      maybeFail('startSession');
       const doc = docs.find((d) => d.id === caseId && d.version === version);
       if (!doc) throw new DiveApiError('not_found', 'case version is not published');
       const existing = [...sessions.entries()].find(([, s]) => s.device === deviceId && s.doc === doc);
@@ -157,7 +175,9 @@ export function createFakeApi(docs: PublicCase[], opts: { versionNote?: Partial<
     },
     async submit(sessionId, slot, value) {
       log('submit', sessionId, slot, value);
+      maybeFail('submit');
       const s = session(sessionId);
+      if (!docs.includes(s.doc)) throw new DiveApiError('gone', 'this case version is no longer published');
       if (s.answers.some((a) => a.step_id === slot)) return reveal(sessionId, slot, true);
       const expected = slotsOf(s.doc)[s.answers.length];
       if (expected !== slot) throw new DiveApiError('out_of_order', `expected ${expected}, got ${slot}`);
@@ -166,6 +186,7 @@ export function createFakeApi(docs: PublicCase[], opts: { versionNote?: Partial<
     },
     async getReveal(sessionId, slot) {
       log('getReveal', sessionId, slot);
+      maybeFail('getReveal');
       const s = session(sessionId);
       if (!s.answers.some((a) => a.step_id === slot))
         throw new DiveApiError('forbidden', 'commit an answer before seeing the crowd');

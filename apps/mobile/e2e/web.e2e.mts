@@ -6,8 +6,9 @@
  *   2. exports the web app pointed at the local stack and serves it with an SPA
  *      fallback;
  *   3. plays each case end to end in Chromium, checking that no crowd result
- *      reaches the screen (or the network) before its answer is committed, and
- *      saves screenshots of the key screens;
+ *      reaches the screen (or the network) before its answer is committed,
+ *      reloading mid-dive to check that it resumes with answers locked, and
+ *      saving screenshots of the key screens;
  *   4. checks that /case/<slug> and /case/<slug>/about load directly.
  *
  *   pnpm --filter @sia/mobile e2e:web
@@ -34,7 +35,7 @@ const PHONE = { width: 390, height: 844 };
 const TIMEOUT = 15_000;
 
 /** Generic reveal copy that must never be on screen before a commit. */
-const CROWD_TEXT = /Everyone who reached this fact|readers moved here|held steady|moved everyone most/;
+const CROWD_TEXT = /Everyone who reached this fact|(readers|crowd) moved|held steady|moved everyone most/;
 
 // ---------------------------------------------------------------------------
 // Build
@@ -109,6 +110,17 @@ async function drag(page: Page, to: number) {
   assert.ok(Math.abs(value - to * 100) <= 3, `dragged to ${to * 100} but the slider reads ${value}`);
 }
 
+/** Taps (clicks without moving) the slider track at a fraction of its width, and checks the value lands there. */
+async function tap(page: Page, at: number) {
+  const slider = page.getByTestId(testIds.slider);
+  await slider.scrollIntoViewIfNeeded();
+  const box = await slider.boundingBox();
+  assert.ok(box, 'slider has no box');
+  await page.mouse.click(box.x + box.width * at, box.y + box.height / 2);
+  const value = await sliderValue(page);
+  assert.ok(Math.abs(value - at * 100) <= 4, `tapped at ${at * 100} but the slider reads ${value}`);
+}
+
 async function keys(page: Page, key: string, times: number) {
   await page.getByTestId(testIds.slider).focus();
   for (let i = 0; i < times; i++) await page.keyboard.press(key);
@@ -118,7 +130,7 @@ async function keys(page: Page, key: string, times: number) {
  * Screenshots the whole reading column: the page scrolls inside a ScrollView,
  * so the viewport is stretched to the content's height first.
  */
-async function shot(page: Page, path: string, settleMs = 0) {
+async function shot(page: Page, path: string, settleMs = 0, width = PHONE.width) {
   if (settleMs) await page.waitForTimeout(settleMs);
   const height = await page.evaluate(() => {
     let h = document.documentElement.scrollHeight;
@@ -129,7 +141,7 @@ async function shot(page: Page, path: string, settleMs = 0) {
     }
     return Math.ceil(h);
   });
-  await page.setViewportSize({ width: PHONE.width, height: Math.min(Math.max(height, PHONE.height), 5000) });
+  await page.setViewportSize({ width, height: Math.min(Math.max(height, PHONE.height), 5000) });
   await page.waitForTimeout(150);
   await page.screenshot({ path });
   await page.setViewportSize(PHONE);
@@ -186,11 +198,17 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
   const page = await context.newPage();
   const errors = watchErrors(page);
   const rpc = watchRpc(page);
+  // Mid-dive the page asks before unloading (see useLeaveGuard); the reload below accepts.
+  const dialogs: string[] = [];
+  page.on('dialog', (d) => {
+    dialogs.push(d.type());
+    void d.accept();
+  });
   const id = (t: string) => page.getByTestId(t);
   const screenshots: string[] = [];
-  const capture = async (name: string, settleMs = 0) => {
+  const capture = async (name: string, settleMs = 0, width = PHONE.width) => {
     const path = join(shotsDir, `${doc.slug}-${name}.png`);
-    await shot(page, path, settleMs);
+    await shot(page, path, settleMs, width);
     screenshots.push(path);
   };
   const answers: { step_id: string; value: number }[] = [];
@@ -205,7 +223,9 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
     if (doc.content_warning) {
       await visible(page.getByText(doc.content_warning, { exact: true }));
       assert.equal(await id(testIds.next).getAttribute('aria-disabled'), 'true', 'Begin is enabled before the warning');
+      assert.equal(await id(testIds.contentWarningAck).getAttribute('aria-checked'), 'false');
       await id(testIds.contentWarningAck).click();
+      assert.equal(await id(testIds.contentWarningAck).getAttribute('aria-checked'), 'true');
     } else {
       assert.equal(await id(testIds.contentWarning).count(), 0);
     }
@@ -231,6 +251,12 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
     await id(testIds.pollCommit).click();
     await visible(id(testIds.lockedNote));
     assert.equal(await id(testIds.pollCommit).count(), 0);
+    assert.equal(await id(testIds.slider).getAttribute('aria-disabled'), 'true');
+    assert.match((await id(testIds.slider).getAttribute('aria-valuetext')) ?? '', /locked$/);
+    assert.ok(
+      await page.evaluate(() => document.activeElement?.textContent?.startsWith('Locked at') ?? false),
+      'focus did not move to the locked note',
+    );
     await keys(page, 'ArrowLeft', 3);
     assert.equal(await sliderValue(page), before, 'the Before answer changed after commit');
     answers.push({ step_id: 'before', value: before });
@@ -256,10 +282,15 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
         await visible(page.getByText(step.headline, { exact: true }));
       }
 
-      if (step.depth.length > 0) await id(testIds.goDeeper).click();
+      if (step.depth.length > 0) {
+        assert.equal(await id(testIds.goDeeper).getAttribute('aria-expanded'), 'false');
+        await id(testIds.goDeeper).click();
+        assert.equal(await id(testIds.goDeeper).getAttribute('aria-expanded'), 'true');
+      }
       await assertNoCrowd(page, where);
       if (i === 0) await capture('02-step-before-commit');
 
+      if (i === 0) await tap(page, 0.25);
       if (i % 2 === 0) await drag(page, i % 4 === 0 ? 0.62 : 0.4);
       else await keys(page, 'ArrowLeft', 6);
       const value = await sliderValue(page);
@@ -283,10 +314,33 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
       await visible(shown.getByTestId(testIds.crowdChart));
       await visible(shown.getByTestId(testIds.seededNote));
       assert.equal(await shown.getByTestId(testIds.mirror).innerText(), mirrorText(previous, value));
+      assert.equal(
+        await page.evaluate(() => document.activeElement?.textContent ?? ''),
+        mirrorText(previous, value),
+        `${where}: focus did not move to the reveal`,
+      );
       if (i === 0) await capture('03-step-after-commit', 1200);
 
       answers.push({ step_id: step.id, value });
       previous = value;
+
+      if (i === 0 && doc.steps.length > 1) {
+        // Reload mid-dive: the page asks first, then the dive resumes at the next
+        // fact on the same session, with nothing about that fact's crowd shown.
+        await page.reload();
+        assert.ok(dialogs.includes('beforeunload'), 'reloading mid-dive did not ask first');
+        await visible(id(testIds.caseCard));
+        await assertNoCrowd(page, 'case card after reload');
+        if (doc.content_warning) await id(testIds.contentWarningAck).click();
+        const [again] = await Promise.all([page.waitForResponse(isRpc('start_session')), id(testIds.next).click()]);
+        const resumed = (await again.json()) as { session_id: string; resumed: boolean; answers: unknown[] };
+        assert.equal(resumed.resumed, true, 'the reload did not resume the session');
+        assert.equal(resumed.session_id, session.session_id);
+        assert.deepEqual(resumed.answers, answers);
+        await visible(id(testIds.notice));
+        await visible(page.getByText(`Fact 2 of ${doc.steps.length}`, { exact: true }));
+        continue;
+      }
       await id(testIds.next).click();
     }
 
@@ -328,6 +382,13 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
       assert.ok(cardText.includes(part), `share card is missing ${JSON.stringify(part)}`);
     }
     await capture('05-share-screen', 300);
+    // On a 320px phone the card scales down to fit the column instead of overflowing it.
+    await page.setViewportSize({ width: 320, height: PHONE.height });
+    await page.waitForTimeout(150);
+    const narrow = await card.boundingBox();
+    assert.ok(narrow && narrow.x >= 0 && narrow.x + narrow.width <= 320, `share card overflows 320px: ${JSON.stringify(narrow)}`);
+    assert.ok(Math.abs(narrow.height / narrow.width - 425 / 340) < 0.02, 'share card lost its proportions');
+    await capture('05b-share-screen-320', 300, 320);
     const cardPath = join(shotsDir, `${doc.slug}-06-share-card.png`);
     await card.screenshot({ path: cardPath });
     screenshots.push(cardPath);
@@ -346,14 +407,15 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
       screenshots.push(pngPath);
     }
 
-    // The network told the same story: one session, one submit per slot, in
-    // order, and never a reveal fetched for a slot that had not been answered.
+    // The network told the same story: one session (started, then resumed after
+    // the reload), one submit per slot, in order, and never a reveal fetched for
+    // a slot that had not been answered.
     assert.deepEqual(
       rpc.filter((c) => c.name === 'submit_response').map((c) => c.slot),
       slotsOf(doc),
     );
     assert.equal(rpc.filter((c) => c.name === 'get_reveal').length, 0);
-    assert.equal(rpc.filter((c) => c.name === 'start_session').length, 1);
+    assert.equal(rpc.filter((c) => c.name === 'start_session').length, doc.steps.length > 1 ? 2 : 1);
     assert.deepEqual(errors, [], 'the page logged errors');
     return { sessionId: session.session_id, answers, screenshots };
   } catch (e) {

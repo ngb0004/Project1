@@ -93,12 +93,17 @@ describe('versionNoteText', () => {
       ),
     ).toBe('Updated Oct 12; 15 people saw earlier versions.');
   });
+
+  it('leaves out the count when no one finished an earlier version', () => {
+    expect(versionNoteText(note([{ version: 1, completions: 0 }]))).toBe('Updated Oct 12.');
+  });
 });
 
 describe('seeded and crowd-size notes', () => {
   it('flags any seeded share, and says so plainly when the crowd is all seeded', () => {
     expect(seededNoteText(0)).toBeNull();
-    expect(seededNoteText(1)).toBe('Early estimate: these crowd numbers are seeded, not yet from real readers.');
+    expect(seededNoteText(1)).toBe('Early estimate: these crowd numbers are seeded until more people finish.');
+    expect(seededNoteText(0.996)).toBe('Early estimate: these crowd numbers are seeded until more people finish.');
     expect(seededNoteText(0.42)).toBe('Includes seeded estimates (42% of this crowd) until more people finish.');
     expect(seededNoteText(0.001)).toBe('Includes seeded estimates (0% of this crowd) until more people finish.');
   });
@@ -157,5 +162,17 @@ describe('share card', () => {
       headline: 'I started at 95. I ended at 70.',
       tagline: SHARE_TAGLINE,
     });
+  });
+
+  it('draws no crowd when no completion is counted yet', async () => {
+    const doc = loadFixture(FIXTURES[0]!);
+    const api = new LocalDiveApi({ cases: [{ doc }] });
+    const s = await api.startSession(doc.id, doc.version, deviceId());
+    let last;
+    for (const slot of ['before', ...doc.steps.map((x) => x.id), 'after']) last = await api.submit(s.session_id, slot, 50);
+    if (!last || !isFinalReveal(last)) throw new Error('expected the final reveal');
+    // What the database sends when the reader's own session falls under the reading-time floor.
+    const empty = { ...last, crowd: { ...last.crowd, n_real: 0, mean_before: null, mean_after: null, after_histogram: Array(10).fill(0) } };
+    expect(shareCardData(doc, empty, caseUrl('https://example.test', doc.slug)).crowdAfter).toBeNull();
   });
 });

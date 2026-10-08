@@ -58,7 +58,7 @@ export function ShiftChart({
     <View
       testID={testIds.crowdChart}
       accessible
-      accessibilityLabel={`How readers moved at this step: ${BUCKETS.map(describe).join('; ')}.`}
+      accessibilityLabel={`How the crowd moved at this step: ${BUCKETS.map(describe).join('; ')}.`}
     >
       <View style={styles.columns}>
         {BUCKETS.map((b) => {
@@ -147,6 +147,7 @@ export function JourneyChart({
   afterHistogram,
   leftLabel,
   rightLabel,
+  accessibilityLabel,
 }: {
   /** The reader's answers in order: before, each step, after. */
   path: number[];
@@ -154,6 +155,8 @@ export function JourneyChart({
   afterHistogram: Histogram | null;
   leftLabel: string;
   rightLabel: string;
+  /** What the chart shows, in words, for screen readers. */
+  accessibilityLabel: string;
 }) {
   const progress = useEntrance({ delay: 120, duration: 700 });
   const binW = PLOT_W / 10;
@@ -166,7 +169,7 @@ export function JourneyChart({
   const last = points[points.length - 1];
 
   return (
-    <View testID={testIds.finalChart}>
+    <View testID={testIds.finalChart} accessible accessibilityRole="image" accessibilityLabel={accessibilityLabel}>
       <Text style={[type.small, styles.bandLabel]}>Everyone, before</Text>
       <Animated.View style={[styles.svgBox, { opacity: progress }]}>
         <Svg width="100%" height="100%" viewBox={`0 0 ${VB_W} ${VB_H}`}>

@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, within } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
 import type { PublicCase } from '@sia/case-schema';
-import { DiveFlow, testIds, type DiveServices } from '@sia/dive-ui';
+import { DiveApiError, shareCardData, type FinalReveal } from '@sia/dive-engine';
+import { DiveFlow, ShareCard, testIds, type DiveProgressStore, type DiveServices } from '@sia/dive-ui';
 import { createFakeApi, type FakeApi } from './fakeApi';
 
 const SOURCE = {
@@ -59,17 +60,22 @@ function makeServices(): DiveServices & { share: jest.Mock; openUrl: jest.Mock; 
   return {
     openUrl: jest.fn(),
     share: jest.fn(async () => ({ status: 'shared' as const })),
-    copy: jest.fn(async () => undefined),
+    copy: jest.fn(async () => true),
   };
 }
 
-async function renderFlow(api: FakeApi, services = makeServices(), d: PublicCase = doc) {
+async function renderFlow(
+  api: FakeApi,
+  services: DiveServices = makeServices(),
+  d: PublicCase = doc,
+  shareBaseUrl: string | null = 'https://dive.test',
+) {
   await render(
     <DiveFlow
       api={api}
       slug={d.slug}
       deviceId="device-0123456789abcdef"
-      shareBaseUrl="https://dive.test"
+      shareBaseUrl={shareBaseUrl}
       services={services}
     />,
   );
@@ -98,9 +104,10 @@ describe('DiveFlow', () => {
     expect(screen.getByText('How much does the test question matter?')).toBeOnTheScreen();
     await press(testIds.next);
 
-    // 2. Starting facts
+    // 2. Starting facts (the heading claims nothing the record's confidence labels might contradict)
     await screen.findByTestId(testIds.startingFacts);
     expect(calls(api, 'startSession')).toHaveLength(1);
+    expect(screen.getByText('Where things stand')).toBeOnTheScreen();
     expect(screen.getByText('The baseline fact.')).toBeOnTheScreen();
     expect(screen.getByText('Established')).toBeOnTheScreen();
     await press(testIds.next);
@@ -152,7 +159,7 @@ describe('DiveFlow', () => {
     expect(within(reveal).getByText('You moved from 90 to 75.')).toBeOnTheScreen();
     expect(within(reveal).getByTestId(testIds.crowdChart)).toBeOnTheScreen();
     expect(within(reveal).getByTestId(testIds.seededNote)).toBeOnTheScreen();
-    expect(within(reveal).getByText(/41% of readers moved here/)).toBeOnTheScreen();
+    expect(within(reveal).getByText(/41% of this crowd moved here/)).toBeOnTheScreen();
     await press(testIds.next);
 
     // Second step: hidden again until commit; not moving is mirrored too
@@ -309,5 +316,285 @@ describe('DiveFlow', () => {
       />,
     );
     expect(await screen.findByTestId(testIds.notFound)).toBeOnTheScreen();
+  });
+});
+
+/** Memory-backed progress store, as the app keeps in SecureStore / localStorage. */
+function memoryStore(): DiveProgressStore & { data: Map<string, number> } {
+  const data = new Map<string, number>();
+  return {
+    data,
+    async get(slug) {
+      return data.get(slug) ?? null;
+    },
+    async set(slug, version) {
+      if (version === null) data.delete(slug);
+      else data.set(slug, version);
+    },
+  };
+}
+
+/** Begins, locks Before at 50 and lands on the first step. */
+async function startDive(api: FakeApi, services: DiveServices = makeServices()) {
+  await renderFlow(api, services);
+  await press(testIds.next);
+  await screen.findByTestId(testIds.startingFacts);
+  await press(testIds.next);
+  await press(testIds.pollCommit);
+  await screen.findByTestId(testIds.lockedNote);
+  await press(testIds.next);
+  await screen.findByText('The first headline.');
+}
+
+describe('DiveFlow when a commit fails', () => {
+  it.each([
+    ['rate_limited', 'Too many answers from this network. Wait a minute and try again.'],
+    ['network', "Couldn't reach the server. Check your connection and try again."],
+  ] as const)('keeps the answer open and the crowd hidden after a %s error', async (code, message) => {
+    const api = createFakeApi([doc]);
+    await startDive(api);
+    api.failNext('submit', new DiveApiError(code, 'refused'));
+    await press(testIds.pollCommit);
+    expect(await screen.findByTestId(testIds.error)).toHaveTextContent(message);
+    expect(screen.queryByTestId(testIds.reveal)).toBeNull();
+    expect(screen.queryByTestId(testIds.lockedNote)).toBeNull();
+    expect(screen.queryByTestId(testIds.next)).toBeNull();
+    expect(screen.queryByTestId(testIds.reload)).toBeNull();
+    expect(screen.getByTestId(testIds.pollCommit)).toBeEnabled();
+    expect(screen.getByTestId(testIds.slider)).toBeEnabled();
+
+    // Trying again commits, and only now shows the crowd.
+    await press(testIds.pollCommit);
+    await screen.findByTestId(testIds.reveal);
+    expect(calls(api, 'submit').map((c) => c.args[1])).toEqual(['before', 'one', 'one']);
+  });
+
+  it.each(['out_of_order', 'not_found'] as const)(
+    'replaces Lock in with a reload after a %s error, which resyncs the session',
+    async (code) => {
+      const api = createFakeApi([doc]);
+      await startDive(api);
+      api.failNext('submit', new DiveApiError(code, 'refused'));
+      await press(testIds.pollCommit);
+      await screen.findByTestId(testIds.reload);
+      expect(screen.queryByTestId(testIds.pollCommit)).toBeNull();
+      expect(screen.queryByTestId(testIds.reveal)).toBeNull();
+      expect(screen.getByTestId(testIds.slider)).toBeDisabled();
+
+      api.calls.length = 0;
+      await press(testIds.reload);
+      // Same version: the dive reloads and picks the session up at this step, without another Begin.
+      await screen.findByText('The first headline.');
+      expect(screen.getByTestId(testIds.notice)).toHaveTextContent(/Welcome back/);
+      expect(calls(api, 'getCase')).toHaveLength(1);
+      expect(calls(api, 'startSession')).toHaveLength(1);
+      expect(screen.getByTestId(testIds.pollCommit)).toBeEnabled();
+      expect(screen.queryByTestId(testIds.reveal)).toBeNull();
+    },
+  );
+
+  it('sends one answer when Lock in is pressed twice in a row', async () => {
+    const api = createFakeApi([doc]);
+    await startDive(api);
+    // Two presses in the same tick, before React can re-render the button as disabled.
+    const button = screen.getByTestId(testIds.pollCommit);
+    const tap = () => button.props.onClick({ nativeEvent: {}, target: 1, currentTarget: 1, stopPropagation() {} });
+    await act(async () => {
+      tap();
+      tap();
+    });
+    await screen.findByTestId(testIds.reveal);
+    expect(calls(api, 'submit').map((c) => c.args[1])).toEqual(['before', 'one']);
+  });
+});
+
+describe('DiveFlow across a revision', () => {
+  it('finishes the version in progress when a revision is published mid-dive', async () => {
+    const docs = [doc];
+    const api = createFakeApi(docs);
+    const services = { ...makeServices(), progress: memoryStore() };
+    await startDive(api, services);
+    expect(services.progress.data.get(doc.slug)).toBe(1);
+    await screen.unmount();
+
+    docs.push({ ...doc, version: 2 }); // v1 stays published
+    await renderFlow(api, services);
+    expect(screen.getByTestId(testIds.notice)).toHaveTextContent(
+      'A newer version of this dive is out. You are finishing the version you started.',
+    );
+    await press(testIds.next);
+    await screen.findByText('The first headline.');
+    expect(screen.getByTestId(testIds.notice)).toHaveTextContent(/Welcome back/);
+    expect(calls(api, 'startSession').at(-1)!.args[1]).toBe(1);
+    expect(screen.queryByTestId(testIds.beforeScreen)).toBeNull();
+  });
+
+  it('says why it starts over when the version in progress was taken down', async () => {
+    const docs = [doc];
+    const api = createFakeApi(docs);
+    const services = { ...makeServices(), progress: memoryStore() };
+    await startDive(api, services);
+    await screen.unmount();
+
+    docs.splice(0, 1, { ...doc, version: 2 });
+    await renderFlow(api, services);
+    expect(screen.getByTestId(testIds.notice)).toHaveTextContent(/updated after you started it/);
+    await press(testIds.next);
+    await screen.findByTestId(testIds.startingFacts);
+    expect(calls(api, 'startSession').at(-1)!.args[1]).toBe(2);
+  });
+
+  it('reloads onto the live version, with the same explanation, when a commit finds its version gone', async () => {
+    const docs = [doc];
+    const api = createFakeApi(docs);
+    await startDive(api);
+    docs.splice(0, 1, { ...doc, version: 2 });
+    await press(testIds.pollCommit);
+    expect(await screen.findByTestId(testIds.error)).toHaveTextContent('This version of the dive is no longer available.');
+    await press(testIds.reload);
+    await screen.findByTestId(testIds.caseCard);
+    expect(screen.getByTestId(testIds.notice)).toHaveTextContent(/updated after you started it/);
+    expect(calls(api, 'getCase').map((c) => c.args[1])).toEqual([undefined, 1, undefined]);
+  });
+
+  it('forgets the version once the dive is finished', async () => {
+    const api = createFakeApi([doc]);
+    const services = { ...makeServices(), progress: memoryStore() };
+    await startDive(api, services);
+    for (let i = 0; i < 2; i++) {
+      await press(testIds.pollCommit);
+      await screen.findByTestId(testIds.reveal);
+      await press(testIds.next);
+    }
+    await screen.findByTestId(testIds.afterScreen);
+    expect(services.progress.data.get(doc.slug)).toBe(1);
+    await press(testIds.pollCommit);
+    await screen.findByTestId(testIds.lockedNote);
+    expect(services.progress.data.has(doc.slug)).toBe(false);
+  });
+});
+
+describe('DiveFlow re-fetching reveals', () => {
+  async function resumeAtStepTwo(api: FakeApi) {
+    const first = await api.startSession(doc.id, doc.version, 'device-0123456789abcdef');
+    await api.submit(first.session_id, 'before', 80);
+    await api.submit(first.session_id, 'one', 60);
+    api.calls.length = 0;
+    await renderFlow(api);
+    await press(testIds.next);
+    await screen.findByText('The second headline.');
+  }
+
+  it('fetches the reveal of an answered step when the reader goes back to it', async () => {
+    const api = createFakeApi([doc]);
+    await resumeAtStepTwo(api);
+    expect(calls(api, 'getReveal')).toHaveLength(0);
+    await press(testIds.back);
+    expect(await screen.findByText('You moved from 80 to 60.')).toBeOnTheScreen();
+    expect(calls(api, 'getReveal').map((c) => c.args[1])).toEqual(['one']);
+  });
+
+  it('retries network failures with a growing pause, then offers Try again', async () => {
+    jest.useFakeTimers();
+    try {
+      const api = createFakeApi([doc]);
+      await resumeAtStepTwo(api);
+      const down = () => new DiveApiError('network', 'offline');
+      api.failNext('getReveal', down(), down(), down());
+      await press(testIds.back);
+      expect(screen.getByText('Loading how everyone moved…')).toBeOnTheScreen();
+      await screen.findByTestId(testIds.retry, {}, { timeout: 20000 });
+      expect(calls(api, 'getReveal')).toHaveLength(3);
+      expect(screen.getByTestId(testIds.error)).toHaveTextContent(/^Couldn't reach the server\./);
+      await press(testIds.retry);
+      expect(await screen.findByText('You moved from 80 to 60.')).toBeOnTheScreen();
+      expect(calls(api, 'getReveal')).toHaveLength(4);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('does not retry an error that will not clear by itself', async () => {
+    const api = createFakeApi([doc]);
+    await resumeAtStepTwo(api);
+    api.failNext('getReveal', new DiveApiError('gone', 'this case version is no longer published'));
+    await press(testIds.back);
+    await screen.findByTestId(testIds.reload);
+    expect(calls(api, 'getReveal')).toHaveLength(1);
+    expect(screen.getByTestId(testIds.error)).toHaveTextContent('This version of the dive is no longer available.');
+  });
+});
+
+describe('ShareScreen', () => {
+  async function playToShare(api: FakeApi, services: DiveServices, shareBaseUrl: string | null = 'https://dive.test') {
+    await renderFlow(api, services, doc, shareBaseUrl);
+    await press(testIds.next);
+    await screen.findByTestId(testIds.startingFacts);
+    await press(testIds.next);
+    for (const screenId of [testIds.beforeScreen, testIds.stepScreen, testIds.stepScreen, testIds.afterScreen]) {
+      await screen.findByTestId(screenId);
+      await press(testIds.pollCommit);
+      await screen.findByTestId(screenId === testIds.stepScreen ? testIds.reveal : testIds.lockedNote);
+      await press(testIds.next);
+    }
+    await screen.findByTestId(testIds.finalReveal);
+    await press(testIds.next);
+    await screen.findByTestId(testIds.shareCard);
+  }
+
+  it('says nothing when the platform cannot tell a share from a cancel, and offers the image separately', async () => {
+    const services = {
+      ...makeServices(),
+      share: jest.fn(async () => ({ status: 'opened' as const })),
+      shareImage: jest.fn(async () => undefined),
+    };
+    await playToShare(createFakeApi([doc]), services);
+    await press(testIds.shareButton);
+    expect(services.share).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId(testIds.shareStatus)).toBeNull();
+    await press(testIds.shareImage);
+    expect(services.shareImage).toHaveBeenCalledWith(expect.objectContaining({ card: expect.anything() }));
+    expect(screen.queryByTestId(testIds.shareStatus)).toBeNull();
+  });
+
+  it('shows the link to copy by hand when the clipboard refuses', async () => {
+    const services = { ...makeServices(), copy: jest.fn(async () => false) };
+    await playToShare(createFakeApi([doc]), services);
+    await press(testIds.copyLink);
+    expect(await screen.findByTestId(testIds.shareStatus)).toHaveTextContent(/^Couldn't copy the link\./);
+    expect(screen.getByTestId(testIds.shareUrl)).toHaveTextContent('https://dive.test/case/tiny-case');
+    expect(screen.queryByText('Link copied.')).toBeNull();
+  });
+
+  it('leaves the link off when there is no public web origin', async () => {
+    const services = makeServices();
+    await playToShare(createFakeApi([doc]), services, null);
+    const card = screen.getByTestId(testIds.shareCard);
+    expect(within(card).queryByText(/dive:\/\/|https?:\/\//)).toBeNull();
+    expect(screen.queryByTestId(testIds.copyLink)).toBeNull();
+    await press(testIds.shareButton);
+    expect(services.share).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'I started at 50. I ended at 50. Find where you break.' }),
+    );
+  });
+});
+
+describe('ShareCard', () => {
+  it('draws no crowd chart when no completion is counted yet', async () => {
+    const api = createFakeApi([doc]);
+    const s = await api.startSession(doc.id, doc.version, 'device-share-card');
+    let last;
+    for (const slot of ['before', 'one', 'two', 'after']) last = await api.submit(s.session_id, slot, 40);
+    const final = last as FinalReveal;
+    const empty: FinalReveal = {
+      ...final,
+      crowd: { ...final.crowd, n_real: 0, n_seed: 0, mean_before: null, mean_after: null, after_histogram: Array(10).fill(0) },
+    };
+    await render(<ShareCard card={shareCardData(doc, empty, 'https://dive.test/case/tiny-case')} />);
+    expect(screen.queryByText('Where everyone ended up')).toBeNull();
+    expect(screen.getByText('https://dive.test/case/tiny-case')).toBeOnTheScreen();
+
+    await render(<ShareCard card={shareCardData(doc, final, 'https://dive.test/case/tiny-case')} />);
+    expect(screen.getByText('Where everyone ended up')).toBeOnTheScreen();
   });
 });

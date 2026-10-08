@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { FlagReason } from '@sia/dive-engine';
+import { announce, useFocusOnMount } from './a11y';
 import { errorMessage } from './copy';
 import { flagReasonId, testIds } from './testIds';
 import { MAX_WIDTH, colors, fonts, space, type } from './theme';
@@ -12,6 +13,66 @@ const REASONS: { value: FlagReason; label: string }[] = [
   { value: 'inaccurate', label: 'Inaccurate' },
   { value: 'other', label: 'Something else' },
 ];
+
+const FOCUSABLE = 'a[href], button, input, textarea, select, [tabindex]:not([tabindex="-1"])';
+
+/**
+ * On the web, a modal sheet keeps keyboard focus inside itself, closes on
+ * Escape, and hands focus back to whatever opened it. (iOS uses
+ * accessibilityViewIsModal; Android's back button closes the sheet.)
+ */
+function useWebDialog(sheet: RefObject<View | null>, onClose: () => void) {
+  const close = useRef(onClose);
+  useEffect(() => {
+    close.current = onClose;
+  });
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const node = sheet.current as unknown as HTMLElement | null;
+    if (!node) return;
+    const opener = document.activeElement as HTMLElement | null;
+    node.focus({ preventScroll: true });
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close.current();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+        (el) => !el.hasAttribute('disabled') && el.getAttribute('aria-disabled') !== 'true',
+      );
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!first || !last) return;
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === node || !node.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !node.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, [sheet]);
+}
+
+/** Replaces the form, and the focused Send button with it, so it takes focus. */
+function FlagThanks() {
+  const ref = useFocusOnMount(true);
+  return (
+    <View ref={ref} tabIndex={-1} accessible style={styles.focusTarget}>
+      <Text style={type.body} testID={testIds.flagThanks}>
+        Thank you. Your flag goes to the editor who reviews this dive.
+      </Text>
+    </View>
+  );
+}
 
 /**
  * "Flag this fact": an in-place sheet (not a native Modal, so it stays inside
@@ -30,6 +91,8 @@ export function FlagSheet({
   const [note, setNote] = useState('');
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const sheet = useRef<View>(null);
+  useWebDialog(sheet, onClose);
 
   const submit = async () => {
     if (!reason || status === 'sending') return;
@@ -39,28 +102,39 @@ export function FlagSheet({
       await onSubmit(reason, note.trim() || undefined);
       setStatus('sent');
     } catch (e) {
-      setError(errorMessage(e));
+      const message = errorMessage(e, 'flag');
+      setError(message);
+      announce(message);
       setStatus('idle');
     }
   };
 
   return (
-    <View style={styles.overlay}>
+    <View style={styles.overlay} accessibilityViewIsModal>
       <Pressable
         style={StyleSheet.absoluteFill}
         onPress={onClose}
         accessibilityLabel="Close"
         accessibilityRole="button"
+        // The sheet's own Cancel and Close are the keyboard route out.
+        focusable={false}
+        tabIndex={-1}
       />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.avoider}>
-        <View style={styles.sheet} testID={testIds.flagSheet} accessibilityViewIsModal>
+        <View
+          ref={sheet}
+          style={styles.sheet}
+          testID={testIds.flagSheet}
+          role="dialog"
+          aria-modal
+          aria-label="Flag this fact"
+          tabIndex={-1}
+        >
           <Kicker>Flag this fact</Kicker>
           <Title>{headline}</Title>
           {status === 'sent' ? (
             <>
-              <Text style={type.body} testID={testIds.flagThanks}>
-                Thank you. Your flag goes to the editor who reviews this dive.
-              </Text>
+              <FlagThanks />
               <Button label="Close" onPress={onClose} variant="secondary" testID={testIds.flagCancel} />
             </>
           ) : (
@@ -128,6 +202,7 @@ const styles = StyleSheet.create({
     gap: space.md,
     borderTopLeftRadius: 4,
     borderTopRightRadius: 4,
+    outlineWidth: 0,
   },
   note: {
     minHeight: 72,
@@ -141,4 +216,5 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   error: { color: colors.ink },
+  focusTarget: { outlineWidth: 0 },
 });

@@ -289,3 +289,9 @@ export async function getPublishedCase(db: Db, slug: string, version?: number): 
   ) as PublishedCaseRow[];
   return rows[0] ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// Staff reads for the admin console (cases, alerts, jobs, research log, signals)
+// ---------------------------------------------------------------------------
+
+export * from './admin-reads';

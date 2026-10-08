@@ -6,3 +6,4 @@ export * from './normalize';
 export * from './seed';
 export * from './style';
 export * from './json-schema';
+export * from './diff';

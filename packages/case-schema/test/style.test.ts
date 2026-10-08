@@ -14,3 +14,13 @@ describe('style', () => {
     expect(countSentences('The U.S. attorney declined. It was 3.5 miles away.')).toBe(2);
   });
 });
+
+describe('countSentences on news prose', () => {
+  it('handles initialisms, initials, and lowercase abbreviations', () => {
+    expect(countSentences('The U.S. attorney spoke on Monday. It was brief.')).toBe(2);
+    expect(countSentences('Police in Ithaca, N.Y. said nothing more. The case remains open.')).toBe(2);
+    expect(countSentences('Judge J. Smith ruled at 9 a.m. on Friday. The hearing ended.')).toBe(2);
+    expect(countSentences('He met staff, e.g. the dean, at noon. Then he left.')).toBe(2);
+    expect(countSentences('The vote was taken by Plan B. Then the board adjourned.')).toBe(2);
+  });
+});

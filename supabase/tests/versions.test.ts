@@ -115,17 +115,17 @@ describe('request changes, reject, schedule', () => {
 
   it('approve and schedule publishes when the time comes (cron job)', async () => {
     const { case_id, slug, version } = await submitFixture(pipeline);
-    await adminSchedule(admin, case_id, version, new Date(Date.now() + 3600_000), 'Go live tonight');
+    await adminSchedule(admin, case_id, version, new Date(Date.now() + 2500), 'Go live tonight');
     expect(await getPublishedCase(anon, slug)).toBeNull();
     const queue = await listQueue(admin);
     expect(queue.find((q) => q.case_id === case_id)?.scheduled_publish_at).toBeTruthy();
 
-    await sql(`update public.case_versions set scheduled_publish_at = now() - interval '1 minute' where case_id = $1 and version = $2`, [case_id, version]);
-    const [{ n }] = await sql(`select app.publish_due_versions() as n`);
-    expect(n).toBeGreaterThanOrEqual(1);
+    await new Promise((r) => setTimeout(r, 3000));
+    // pg_cron may already have published it; running the job again is harmless.
+    await sql(`select app.publish_due_versions()`);
     expect((await getPublishedCase(anon, slug))!.version).toBe(version);
     const actions = (await getStaffVersion(admin, case_id, version))!.doc.review.decisions.map((d) => d.action);
-    expect(actions).toEqual(['approve_schedule', 'scheduled_publish']);
+    expect(actions).toEqual(['submitted', 'approve_schedule', 'scheduled_publish']);
   });
 
   it('schedule refuses a time in the past', async () => {

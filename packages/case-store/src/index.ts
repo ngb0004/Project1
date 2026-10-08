@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   assertValidCase,
+  SeedProfile,
   type Case,
   type CaseInput,
   type CaseStatus,
@@ -169,7 +170,15 @@ export async function listQueue(db: Db): Promise<QueueRow[]> {
 // Admin actions
 // ---------------------------------------------------------------------------
 
+/** Loads a version and runs the full schema validator; publishing is blocked on any error. */
+async function assertPublishable(db: Db, caseId: string, version: number): Promise<void> {
+  const row = await getStaffVersion(db, caseId, version);
+  if (!row) throw new StoreError(`version ${caseId}/${version} not found`, 'PT404');
+  assertValidCase(row.doc);
+}
+
 export async function adminPublish(db: Db, caseId: string, version: number, notes?: string) {
+  await assertPublishable(db, caseId, version);
   return unwrap(await db.rpc('admin_publish', { p_case_id: caseId, p_version: version, p_notes: notes ?? null })) as {
     case_id: string;
     version: number;
@@ -178,6 +187,7 @@ export async function adminPublish(db: Db, caseId: string, version: number, note
 }
 
 export async function adminSchedule(db: Db, caseId: string, version: number, at: Date, notes?: string) {
+  await assertPublishable(db, caseId, version);
   return unwrap(
     await db.rpc('admin_schedule', {
       p_case_id: caseId,
@@ -189,6 +199,7 @@ export async function adminSchedule(db: Db, caseId: string, version: number, at:
 }
 
 export async function adminUnschedule(db: Db, caseId: string, version: number) {
+  // Logged as an 'unschedule' decision.
   unwrap(await db.rpc('admin_unschedule', { p_case_id: caseId, p_version: version }));
 }
 
@@ -235,7 +246,9 @@ export async function adminRequestUpdate(db: Db, caseId: string): Promise<string
 }
 
 export async function adminSetSeedProfile(db: Db, caseId: string, profile: SeedProfileInput | null) {
-  return unwrap(await db.rpc('admin_set_seed_profile', { p_case_id: caseId, p_profile: profile })) as {
+  // Store the parsed profile (defaults applied); the database checks it against the same schema.
+  const parsed = profile === null ? null : SeedProfile.parse(profile);
+  return unwrap(await db.rpc('admin_set_seed_profile', { p_case_id: caseId, p_profile: parsed })) as {
     case_id: string;
     live_version: number | null;
     seeded_sessions: number;

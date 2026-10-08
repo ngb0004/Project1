@@ -177,7 +177,9 @@ describe('seeded crowd data', () => {
 describe('abuse floor', () => {
   it('excludes a session that finishes faster than the reading-time floor', async () => {
     const { case_id, version } = await publishedFixture();
-    await restoreAbuseFloor();
+    // Restore only the reading-time floor; the rate limits stay relaxed for this suite.
+    await sql(`update app.settings set value = '15' where key = 'floor.words_per_second'`);
+    await sql(`update app.settings set value = '1.5' where key = 'floor.min_step_seconds'`);
     try {
       const { sessionId, final } = await playDive(anon, case_id, version, STEPS, [10, 20, 30, 40, 50, 60]);
       const [s] = await sql(`select excluded, excluded_reason from public.sessions where id = $1`, [sessionId]);

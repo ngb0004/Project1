@@ -144,3 +144,53 @@ describe('normalizeCase', () => {
     expect(normalizeCase(c).case.steps[0]!.confidence).toBe('alleged');
   });
 });
+
+describe('review fixes', () => {
+  it('rejects impossible months in partial dates', () => {
+    const c = loadFixture('fixture-harbor-bridge');
+    c.sources[0].date = '2026-13';
+    expect(validateCase(c).ok).toBe(false);
+  });
+
+  it('labels empty layer citations as layer_uncited, not step_uncited', () => {
+    const c = loadFixture('fixture-harbor-bridge');
+    c.steps[3].depth[0].source_ids = [];
+    const codes = validateCase(c).errors.map((e) => e.code);
+    expect(codes).toContain('layer_uncited');
+    expect(codes).not.toContain('step_uncited');
+  });
+
+  it('normalizeCase never invents a confidence label or reorders steps without usable orders', () => {
+    const c = loadFixture('fixture-harbor-bridge');
+    delete c.steps[0].confidence;
+    c.steps[1].confidence = 'Established';
+    c.steps[2].order = undefined;
+    const { case: n } = normalizeCase(c);
+    expect(n.steps[0].confidence).toBeUndefined();
+    expect(n.steps[1].confidence).toBe('Established');
+    expect(n.steps.map((s: any) => s.id)).toEqual(['s1', 's2', 's3', 's4']);
+    expect(validateCase(n).ok).toBe(false);
+  });
+
+  it('lints all user-facing copy, not just headlines', () => {
+    const c = loadFixture('fixture-orchard-school');
+    c.title = 'The shocking lunch';
+    c.open_questions[0] = 'Was the vendor clearly at fault?';
+    c.steps[1].depth[0].summary = 'A damning change log.';
+    const paths = validateCase(c).warnings.filter((w) => w.code === 'judging_word').map((w) => w.path);
+    expect(paths).toEqual(expect.arrayContaining(['title', 'open_questions.0', 'steps.1.depth.0.summary']));
+  });
+
+  it('warns when the latest fact-check disagrees with a shipped label', () => {
+    const c = loadFixture('fixture-harbor-bridge');
+    c.review = {
+      fact_check: [
+        { target: 's1', claim: 'x', verdict: 'supported', confidence_before: 'established', confidence_after: 'reported', round: 2 },
+        { target: 'nope', claim: 'y', verdict: 'unsupported', round: 2 },
+      ],
+    };
+    const codes = validateCase(c).warnings.map((w) => w.code);
+    expect(codes).toContain('review_mismatch');
+    expect(codes).toContain('unknown_reference');
+  });
+});

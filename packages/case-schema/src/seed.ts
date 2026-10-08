@@ -108,7 +108,7 @@ export function generateSeedSessions(
     let value = sampleBefore(profile.before_bins, rng);
     const answers: SeedAnswer[] = [{ step_id: BEFORE, value }];
     for (const id of stepIds) {
-      value = applyShift(value, profile.steps[id], rng);
+      value = applyShift(value, Object.hasOwn(profile.steps, id) ? profile.steps[id] : undefined, rng);
       answers.push({ step_id: id, value });
     }
     value = applyShift(value, profile.after, rng);

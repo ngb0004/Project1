@@ -16,7 +16,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "validate-cases": "tsx bin/validate-cases.ts ../../cases"
+    "validate-cases": "tsx bin/validate-cases.ts ../../cases",
+    "gen-json-schema": "tsx bin/gen-json-schema.ts"
   },
   "dependencies": {
     "zod": "4.6.5"

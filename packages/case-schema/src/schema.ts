@@ -41,7 +41,7 @@ export const IsoDate = z
 /** A date that may be partial when the exact day is unknown: `YYYY`, `YYYY-MM` or `YYYY-MM-DD`. */
 export const PartialIsoDate = z
   .string()
-  .regex(/^\d{4}(-\d{2}(-\d{2})?)?$/, 'expected YYYY, YYYY-MM or YYYY-MM-DD')
+  .regex(/^\d{4}(-(0[1-9]|1[0-2])(-\d{2})?)?$/, 'expected YYYY, YYYY-MM or YYYY-MM-DD')
   .refine((s) => s.length !== 10 || isRealDate(s), 'not a real calendar date');
 
 /** ISO-8601 timestamp with timezone. */
@@ -402,6 +402,7 @@ export const DECISION_ACTIONS = [
   'archive',
   'superseded',
   'scheduled_publish',
+  'unschedule',
 ] as const;
 export const DecisionAction = z.enum(DECISION_ACTIONS);
 export type DecisionAction = z.infer<typeof DecisionAction>;

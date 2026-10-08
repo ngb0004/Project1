@@ -113,7 +113,9 @@ export function shareCardData(doc: PublicCase, reveal: FinalReveal, url: string)
   };
 }
 
-/** Deep link into a case for share cards. */
+/** Deep link into a case for share cards. Accepts a web origin or a bare app scheme such as "dive://". */
 export function caseUrl(baseUrl: string, slug: string): string {
-  return `${baseUrl.replace(/\/+$/, '')}/case/${encodeURIComponent(slug)}`;
+  // Trim trailing slashes, but keep the "//" of a bare scheme ("dive://" must not become "dive:").
+  const base = /^[a-z][a-z0-9+.-]*:\/*$/i.test(baseUrl) ? baseUrl.replace(/:\/*$/, '://') : `${baseUrl.replace(/\/+$/, '')}/`;
+  return `${base}case/${encodeURIComponent(slug)}`;
 }

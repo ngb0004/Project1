@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "Dive",
+    "slug": "dive",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/dive-icon.png",
+    "scheme": "dive",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F6F2EA",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#F6F2EA",
+        "foregroundImage": "./assets/images/dive-adaptive-foreground.png",
+        "backgroundImage": "./assets/images/dive-adaptive-background.png",
+        "monochromeImage": "./assets/images/dive-adaptive-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/dive-favicon.png",
+      "name": "Dive",
+      "backgroundColor": "#F6F2EA",
+      "themeColor": "#F6F2EA"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F6F2EA",
+          "image": "./assets/images/dive-splash.png",
+          "imageWidth": 120
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

@@ -102,7 +102,8 @@ describe('computeStepCrowd / computeFinalCrowd', () => {
     };
     expect(computeStepCrowd([], 'a', 1, 1)).toEqual({ step_id: 'a', n_seed: 0, seed_weight: 1, ...empty });
     const seedsOnly = rows.filter((r) => r.is_seed);
-    expect(computeStepCrowd(seedsOnly, 'a', 1, 0)).toEqual({ step_id: 'a', n_seed: 2, seed_weight: 0, ...empty });
+    // Weightless seeds (faded or left out) are not counted at all.
+    expect(computeStepCrowd(seedsOnly, 'a', 1, 0)).toEqual({ step_id: 'a', n_seed: 0, seed_weight: 0, ...empty });
   });
 
   it('final crowd: completed sessions only, before/after distributions, and the step that moved it most', () => {
@@ -124,7 +125,7 @@ describe('computeStepCrowd / computeFinalCrowd', () => {
     });
   });
 
-  it('final crowd: ties go to the earlier step; with no completions the histograms are zeros', () => {
+  it('final crowd: ties go to the earlier step; with no completions there is no crowd to show', () => {
     const tie: CrowdRow[] = [{ session_id: 't', is_seed: false, excluded: false, values: [50, 50, 40, 40, 50, 50] }];
     expect(computeFinalCrowd(tie, ['a', 'b', 'c', 'd'], 1).top_step_id).toBe('b');
     expect(computeFinalCrowd([], ['a', 'b'], 1)).toEqual({
@@ -132,11 +133,14 @@ describe('computeStepCrowd / computeFinalCrowd', () => {
       n_seed: 0,
       seed_weight: 1,
       seeded_share: 0,
-      before_histogram: Array(10).fill(0),
-      after_histogram: Array(10).fill(0),
+      before_histogram: null,
+      after_histogram: null,
       mean_before: null,
       mean_after: null,
-      steps: [],
+      steps: [
+        { step_id: 'a', mean_delta: null, mean_abs_delta: null, moved_share: 0 },
+        { step_id: 'b', mean_delta: null, mean_abs_delta: null, moved_share: 0 },
+      ],
       top_step_id: null,
     });
   });
@@ -401,7 +405,8 @@ describe('seeded crowd data', () => {
     expect(isFinalReveal(one.last) && one.last.crowd.seeded_share).toBeGreaterThan(0.9);
 
     const two = await play(api, orchard, values);
-    expect(isFinalReveal(two.last) && two.last.crowd).toMatchObject({ n_real: 2, n_seed: 40, seed_weight: 0, seeded_share: 0 });
+    // Faded seeds no longer count at all.
+    expect(isFinalReveal(two.last) && two.last.crowd).toMatchObject({ n_real: 2, n_seed: 0, seed_weight: 0, seeded_share: 0 });
   });
 
   it('uses the shared generator, so seeded numbers are reproducible', () => {
@@ -470,5 +475,28 @@ describe('user signals', () => {
     expect(api.signals().ratings).toEqual([
       expect.objectContaining({ session_id: done.sessionId, side_id: side, rating: 'somewhat_fair' }),
     ]);
+  });
+});
+
+describe('crowd semantics after the phase 1 review', () => {
+  it('names no top step when nobody moved', () => {
+    const still: CrowdRow[] = [
+      { session_id: 'x', is_seed: false, excluded: false, values: [40, 40, 40, 40] },
+      { session_id: 'y', is_seed: false, excluded: false, values: [60, 60, 60, 60] },
+    ];
+    expect(computeFinalCrowd(still, ['a', 'b'], 1).top_step_id).toBeNull();
+  });
+
+  it('fades seeds by real completions across every version of the case', async () => {
+    const seedProfile: SeedProfileInput = { sessions: 10, before_bins: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1], fade_after_real_completions: 2 };
+    const v2 = { ...orchard, version: orchard.version + 1 };
+    const api = new LocalDiveApi({ cases: [{ doc: orchard, seedProfile }, { doc: v2, seedProfile }] });
+    const values = slotsOf(orchard).map(() => 50);
+    // Two real completions on the first version reach the case's threshold ...
+    const first = await api.startSession(orchard.id, orchard.version, 'device-a-0000000000');
+    const second = await api.startSession(orchard.id, orchard.version, 'device-b-0000000000');
+    for (const s of [first, second]) for (const [i, slot] of slotsOf(orchard).entries()) await api.submit(s.session_id, slot, values[i]!);
+    // ... so the newer version's seeds are gone too.
+    expect(api.finalCrowd(orchard.id, v2.version)).toMatchObject({ seed_weight: 0, n_seed: 0, before_histogram: null });
   });
 });

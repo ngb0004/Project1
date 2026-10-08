@@ -320,3 +320,20 @@ describe('user signals', () => {
 });
 
 export { freshSlug };
+
+describe('seeds fade case-wide', () => {
+  it('a version published after the case reached its real crowd gets no seeds', async () => {
+    const { case_id, version } = await submitFixture(pipeline);
+    await adminSetSeedProfile(admin, case_id, { sessions: 20, before_bins: Array(10).fill(1), fade_after_real_completions: 2 });
+    await adminPublish(admin, case_id, version);
+    for (let i = 0; i < 2; i++) await playDive(anon, case_id, version, STEPS, [50, 50, 50, 50, 50, 50]);
+    const doc = (await getStaffVersion(admin, case_id, version))!.doc;
+    const edit = await adminSaveEdit(admin, case_id, version, { ...doc, title: 'Updated' });
+    await adminPublish(admin, case_id, edit.version);
+    const [{ n }] = await sql(`select count(*)::int as n from public.sessions where case_id = $1 and case_version = $2 and is_seed`, [case_id, edit.version]);
+    expect(n).toBe(0);
+    const crowd = await admin.rpc('admin_final_crowd', { p_case_id: case_id, p_version: edit.version });
+    expect(crowd.data).toMatchObject({ n_real: 0, n_seed: 0, seed_weight: 0, before_histogram: null, top_step_id: null });
+    expect(crowd.data.version_note.earlier_versions).toEqual([expect.objectContaining({ version, completions: 2 })]);
+  });
+});

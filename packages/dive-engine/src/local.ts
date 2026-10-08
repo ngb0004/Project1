@@ -102,7 +102,9 @@ export function computeStepCrowd(rows: CrowdRow[], stepId: string, stepIndex: nu
   return stepCrowdOf(rows, stepId, stepIndex, seedWeightFromFloat(seedWeight));
 }
 
-function stepCrowdOf(rows: CrowdRow[], stepId: string, stepIndex: number, w: Dec): StepCrowd {
+function stepCrowdOf(allRows: CrowdRow[], stepId: string, stepIndex: number, w: Dec): StepCrowd {
+  // Seeded rows that carry no weight (faded or left out) are not counted at all.
+  const rows = w.v === 0n ? allRows.filter((r) => !r.is_seed) : allRows;
   const total = new WeightedSum();
   const seeded = new WeightedSum();
   const sumValue = new WeightedSum();
@@ -176,7 +178,8 @@ export function computeFinalCrowd(rows: CrowdRow[], stepIds: string[], seedWeigh
   return finalCrowdOf(rows, stepIds, seedWeightFromFloat(seedWeight));
 }
 
-function finalCrowdOf(rows: CrowdRow[], stepIds: string[], w: Dec): FinalCrowd {
+function finalCrowdOf(allRows: CrowdRow[], stepIds: string[], w: Dec): FinalCrowd {
+  const rows = w.v === 0n ? allRows.filter((r) => !r.is_seed) : allRows;
   const afterIndex = stepIds.length + 1;
   // Completed sessions only: the ones that answered After.
   const done = rows.filter((r) => !r.excluded && r.values[afterIndex] !== undefined);
@@ -214,8 +217,13 @@ function finalCrowdOf(rows: CrowdRow[], stepIds: string[], w: Dec): FinalCrowd {
       if (value !== prev) moved.add(1, r.is_seed);
     }
     const sw = weight.value(w);
-    if (sw === null) return; // a step nobody answered has no row, as with GROUP BY
-    const exactAbs = ratio(abs.value(w), sw);
+    // Every step is listed; a step nobody answered has no numbers.
+    const exactAbs = sw === null ? null : ratio(abs.value(w), sw);
+    if (sw === null) {
+      steps.push({ step_id: stepId, mean_delta: null, mean_abs_delta: null, moved_share: 0 });
+      meanAbs.push(null);
+      return;
+    }
     steps.push({
       step_id: stepId,
       mean_delta: roundOrNull(ratio(delta.value(w), sw), 2),
@@ -225,21 +233,21 @@ function finalCrowdOf(rows: CrowdRow[], stepIds: string[], w: Dec): FinalCrowd {
     meanAbs.push(exactAbs);
   });
 
-  // Largest mean absolute change, nulls last; ties go to the earlier step.
+  // Largest mean absolute change among steps that moved anyone; ties go to the earlier step.
   let top = -1;
   meanAbs.forEach((x, i) => {
-    const best = top < 0 ? null : (meanAbs[top] ?? null);
-    if (top < 0 || (x !== null && (best === null || compare(x, best) > 0))) top = i;
+    if (x === null || compare(x, ZERO) <= 0) return;
+    if (top < 0 || compare(x, meanAbs[top]!) > 0) top = i;
   });
+  const hasCrowd = t !== null && t.v > 0n;
 
   return {
     n_real: done.filter((r) => !r.is_seed).length,
     n_seed: done.filter((r) => r.is_seed).length,
     seed_weight: round(w, 4),
     seeded_share: roundOrNull(ratio(seeded.value(w), t), 4) ?? 0,
-    // As in SQL these are never null: with no completions they are ten zeros.
-    before_histogram: histogram(answersAt(0), w),
-    after_histogram: histogram(answersAt(afterIndex), w),
+    before_histogram: hasCrowd ? histogram(answersAt(0), w) : null,
+    after_histogram: hasCrowd ? histogram(answersAt(afterIndex), w) : null,
     mean_before: roundOrNull(ratio(sumBefore.value(w), t), 2),
     mean_after: roundOrNull(ratio(sumAfter.value(w), t), 2),
     steps,
@@ -431,9 +439,14 @@ export class LocalDiveApi implements DiveApi {
     return v.sessions.filter((s) => !s.isSeed && !s.excluded && s.completedAt !== null).length;
   }
 
-  /** app.seed_weight_for(): 1 with no real completions, 0 at the profile's threshold (default 500). */
+  /** Real completions across every version of the case: seeds fade case-wide. */
+  private caseRealCompletions(caseId: string): number {
+    return this.versions.filter((v) => v.caseId === caseId).reduce((a, v) => a + this.realCompletions(v), 0);
+  }
+
+  /** app.seed_weight_for(): 1 with no real completions on the case, 0 at the profile's threshold (default 500). */
   private seedWeightFor(v: LocalVersion, includeSeed: boolean): Dec {
-    return includeSeed ? seedWeightDec(this.realCompletions(v), v.fadeAfter) : ZERO;
+    return includeSeed ? seedWeightDec(this.caseRealCompletions(v.caseId), v.fadeAfter) : ZERO;
   }
 
   private rows(v: LocalVersion): CrowdRow[] {

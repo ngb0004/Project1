@@ -237,14 +237,14 @@ describe('LocalDiveApi crowd math matches the database', () => {
     expect(final.top_step_id).toBe('s2');
   });
 
-  it('nobody moved: every step ties at zero', async () => {
+  it('nobody moved: no step is named as moving the crowd', async () => {
     const v = await freshVersion('fixture-harbor-bridge');
     const rows = await insert(v, [{ values: flat(6, 40) }, { values: flat(6, 60) }]);
     const { final } = await expectParity(v, rows, true);
-    expect(final.top_step_id).toBe('s1');
+    expect(final.top_step_id).toBeNull();
   });
 
-  it('seeds that have fully faded (or are left out) still count in n_seed with zero weight', async () => {
+  it('seeds that have fully faded (or are left out) are not counted at all', async () => {
     const v = await freshVersion('fixture-harbor-bridge', 2);
     const seeds: Planned[] = [
       { is_seed: true, values: [10, 30, 30, 30, 30, 30] },
@@ -253,14 +253,15 @@ describe('LocalDiveApi crowd math matches the database', () => {
     const seedRows = await insert(v, seeds);
     // Seeds only, include_seed false: rows exist but carry no weight.
     const left = await expectParity(v, seedRows, false);
-    expect(left.steps[0]).toMatchObject({ n_seed: 2, histogram: null, mean_delta: null, shift: null });
+    expect(left.steps[0]).toMatchObject({ n_seed: 0, histogram: null, mean_delta: null, shift: null });
     expect(left.final.steps[0]).toMatchObject({ mean_delta: null, moved_share: 0 });
+    expect(left.final).toMatchObject({ n_seed: 0, before_histogram: null, after_histogram: null, top_step_id: null });
 
     // Two real completions reach the threshold of 2: seed weight 0.
     const real = await insert(v, [{ values: [50, 55, 55, 55, 55, 55] }, { values: [20, 20, 20, 20, 20, 25] }]);
     const rows = [...seedRows, ...real];
     const { steps } = await expectParity(v, rows, true);
-    expect(steps[0]).toMatchObject({ seed_weight: 0, seeded_share: 0, n_seed: 2, n_real: 2 });
+    expect(steps[0]).toMatchObject({ seed_weight: 0, seeded_share: 0, n_seed: 0, n_real: 2 });
   });
 
   for (const [fixture, rngSeed] of [

@@ -24,8 +24,9 @@ async function stillReveal(): Promise<FinalReveal> {
 
 it('does not name a step that moved the crowd when nobody moved', async () => {
   const reveal = await stillReveal();
-  expect(reveal.crowd.top_step_id).toBe(doc.steps[0]!.id);
-  await render(<FinalRevealView reveal={reveal} doc={doc} />);
+  expect(reveal.crowd.top_step_id).toBeNull();
+  // Even if a server named a step on a tie at zero, the view must not.
+  await render(<FinalRevealView reveal={{ ...reveal, crowd: { ...reveal.crowd, top_step_id: doc.steps[0]!.id } }} doc={doc} />);
   const crowdTop = screen.getByTestId(testIds.topStepCrowd);
   expect(within(crowdTop).getByText('None of the facts moved the crowd.')).toBeOnTheScreen();
   expect(within(crowdTop).queryByText(doc.steps[0]!.headline)).toBeNull();
@@ -36,7 +37,7 @@ it('does not name a step that moved the crowd when nobody moved', async () => {
 it('says the crowd is not there yet when nobody has finished', async () => {
   const reveal = await stillReveal();
   const empty = computeFinalCrowd([], doc.steps.map((s) => s.id), 1);
-  expect(empty.before_histogram).toEqual(Array(10).fill(0));
+  expect(empty.before_histogram).toBeNull();
   await render(<FinalRevealView reveal={{ ...reveal, crowd: empty }} doc={doc} />);
   expect(screen.getByTestId(testIds.crowdEmpty)).toBeOnTheScreen();
   expect(within(screen.getByTestId(testIds.topStepCrowd)).getByText('Not enough readers yet to say.')).toBeOnTheScreen();

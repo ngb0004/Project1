@@ -1,9 +1,11 @@
 # Social Issues App
 
 A case-agnostic engine for walking people through a public controversy one
-sourced fact at a time. A reader records a gut position on one question, reads
-the facts in a fixed order, answers a micro-poll after each, and sees how their
-certainty moved compared with everyone else.
+sourced fact at a time, in plain words. A reader rates one statement from
+Disagree to Agree, reads the facts in a fixed order and says whether they agree
+with a short statement about each, sees how the left, the center and the right
+are telling the story online (with each claim checked), then rates the
+statement again and sees how they moved compared with everyone else.
 
 Adding a new controversy means running the agent pipeline and approving its
 package in the admin console. It never means writing app code.

@@ -6,7 +6,7 @@ Oct 7, 2026 · @Nick
 
 The app is a case-agnostic engine. Adding a new controversy means running an agent pipeline and approving its output in an admin queue, never writing new app code.
 
-When a controversy erupts, the app is the one calm place where it is already laid out properly. A user records a gut position, walks through the facts one at a time, answers a micro-poll after each fact, and sees how their certainty moved compared with everyone else.
+When a controversy erupts, the app is the one calm place where it is already laid out properly. A user records a gut position on one plain statement, walks through the story one fact at a time and says whether they agree with a short statement about each, sees how the story is being told online by the left, the center and the right, and then sees how their position moved compared with everyone else.
 
 The product has three parts:
 
@@ -19,7 +19,8 @@ The product has three parts:
 **Decisions locked**
 
 - Every user sees the identical dive: same facts, same order, same questions. Personalization comes only from reflecting the user's own earlier answers back to them.
-- There is a micro-poll after every key fact. The crowd result stays hidden until the user commits an answer.
+- There is a quick vote (agree, not sure, disagree) after every key fact. It is separate from the main position, so one fact the user dislikes does not count as a change of their whole view. The crowd result stays hidden until the user commits an answer.
+- The dive tells the story people are actually hearing, in plain words a 12-year-old could follow: the human details and the viral claims, not only the official record, each sourced and checked. Private people who are accused but not convicted are never named.
 - Evidence is layered. A clean spine shows at the top, and the user can tap any fact to go deeper.
 - v1 has no login. Crowd numbers are seeded and clearly flagged as seeded in the data model.
 - Visual direction is editorial and calm. Color and motion are reserved for the reveal.
@@ -60,13 +61,14 @@ Case {
   parent_version?: number,    // what this revision updates
   as_of: date,                // facts current as of
   content_warning?: string,   // e.g. child deaths; shown before start
-  question: {                 // the ONE position everyone is measured on
-    prompt,                   // "How responsible is X for Y?"
-    scale: { type: 'slider', min: 0, max: 100, left_label, right_label }
+  question: {                 // the ONE position everyone is measured on, asked before and after
+    prompt,                   // a plain statement, e.g. "The system failed X."
+    scale: { type: 'slider', min: 0, max: 100, left_label, right_label } // normally "Disagree" .. "Agree"
   },
   starting_facts: Fact[],     // the agreed, no-spin baseline shown first
   steps: Step[],              // ordered; identical for every user
   sides: { id, label, steelman }[], // strongest case for each side, in its own words
+  takes: Take[],              // how the left, center and right tell the story online, each claim checked
   open_questions: string[],   // what is still unknown, shown at the end
   sources: Source[],
   review: ReviewRecord         // agent reports + admin decisions
@@ -75,22 +77,32 @@ Case {
 Step {
   id, order,
   headline,                   // one-line fact for the spine
-  body,                       // 2-4 sentences
+  body,                       // 1-3 short, plain sentences (at most 450 characters)
   depth: Layer[],             // tap-to-go-deeper: documents, quotes, timeline, context
   favors?: side_id | 'neutral', // admin-visible only; used for balance checks
   source_ids: string[],       // every claim must cite at least one
   confidence: 'established' | 'reported' | 'disputed' | 'alleged',
-  micro_poll: { prompt: 'Does this change your position?', re_ask_slider: true }
+  micro_poll: { statement }   // one plain statement the reader agrees or disagrees with
 }
 
-Source { id, title, publisher, url, date, type: 'court_record'|'official'|'primary'|'news'|'analysis', accessed_at, quote_excerpt? }
+Take {
+  id, lens: 'left' | 'center' | 'right', label,
+  summary,                    // the story in that side's own voice
+  seen_on?, source_ids,       // where it is being said
+  checks: { claim, verdict: 'holds_up'|'partly'|'not_backed'|'false'|'unknown', note, source_ids, evidence? }[]
+}
 
-Response { session_id, case_id, case_version, step_id | 'before' | 'after', value: 0-100, created_at }
+Source { id, title, publisher, url, date, type: 'court_record'|'official'|'primary'|'news'|'analysis'|'social', accessed_at, quote_excerpt? }
+
+Response { session_id, case_id, case_version, step_id | 'before' | 'after', value, created_at }
+// value: 0-100 for before and after; 0 (disagree), 50 (not sure) or 100 (agree) for a fact vote
 ```
 
 **Rules**
 
-- Every `Step` needs at least one source. Any step with only a `news` or `analysis` source is labeled `reported`, not `established`.
+- Every `Step` needs at least one source. Any step with only a `news`, `analysis` or `social` source is labeled `reported`, not `established`.
+- A `social` source (a public post) shows what people are saying, never what happened: a fact, a step or a check verdict cannot rest on it alone.
+- The validator warns when the main reading path (question, starting facts, headlines, bodies, fact-vote statements, take summaries, check notes) reads above about an 8th-grade level.
 - `favors` never reaches the client. The admin console uses it to show the balance of the fact order.
 - `Response` stores a `session_id`, not a user ID. When accounts and verification arrive later, sessions get linked to a verified person, and no schema rewrite is needed.
 
@@ -158,14 +170,15 @@ A dive is a fixed sequence of screens generated from the case record. The flow i
 
 1. **Case card.** Title, as-of date, estimated time, and the content warning if there is one.
 2. **Starting facts.** The agreed baseline with no spin, one screen.
-3. **Before.** The question and a 0 to 100 slider. The user's answer is locked and cannot be changed later.
-4. **Step screens, one per step.** The headline and body, with "Go deeper" to expand the depth layers. Then the micro-poll: does this change your position? The user re-sets the slider, pre-filled at their last value. After they commit, the reveal shows two things:
-   - **Personal mirror:** "You moved from 90 to 75" or "This didn't move you."
-   - **Crowd:** how everyone who reached this step moved, shown as a small shift chart.
+3. **Before.** The statement and a Disagree to Agree slider. The user's answer is locked and cannot be changed later.
+4. **Step screens, one per step.** The headline on a marker band, a short plain body, a one-line source list, and "Go deeper" for the detail. Then the fact vote: one plain statement and three buttons, Agree, Not sure and Disagree. After they lock it in, the reveal shows:
+   - **Personal mirror:** "You agreed, like 62% of readers."
+   - **Crowd:** how everyone who reached this fact voted, as three bars.
 5. **Flag this fact.** A link on every step lets the user mark a fact as unfair or cherry-picked, with an optional note. Flags go to the admin console.
-6. **After.** The same question and slider as the Before screen.
-7. **Final reveal.** The user's before-to-after line over the crowd's before and after distributions. Also shown: the step that moved the user most, the step that moved the crowd most, and the open questions.
-8. **Share card.** The default is the personal shift card, such as "I started at 95. I ended at 70. Find where you break." It includes a small crowd distribution and a deep link into this case.
+6. **How it's being told online.** Each take (left, center, right) in its own voice, with what holds up, what is partly true, what is not backed up, what is false and what is unknown.
+7. **After.** The same statement and slider as the Before screen, starting at the Before answer.
+8. **Final reveal.** The user's before-to-after line over the crowd's before and after distributions. Also shown: the fact the crowd split on most, where the user stood apart from the crowd, and the open questions.
+9. **Share card.** The default is the personal shift card, such as "I started at 95. I ended at 70. Find where you break." It includes a small crowd distribution and a deep link into this case.
 
 **Design rules:** editorial and calm, with serif headlines, heavy whitespace, and near-monochrome screens. Accent color and motion appear only in reveals. The crowd result is never visible before the user commits on that step.
 
@@ -173,7 +186,7 @@ A dive is a fixed sequence of screens generated from the case record. The flow i
 
 The crowd numbers are the product, so the data model has to keep real responses and seeded responses separate from the start.
 
-- **Seeding.** Each case can carry a `seed_profile` written by the admin: a before distribution plus a per-step shift. Seeded rows are stored with `is_seed = true`. Every aggregate query takes an `include_seed` flag. Seeds fade out automatically once a case passes a threshold the admin sets, such as 500 real completions.
+- **Seeding.** Each case can carry a `seed_profile` written by the admin: a before distribution, a vote mix for each fact, and a shift from Before to After. Seeded rows are stored with `is_seed = true`. Every aggregate query takes an `include_seed` flag. Seeds fade out automatically once a case passes a threshold the admin sets, such as 500 real completions.
 - **Version integrity.** Aggregates are computed per `case_version`. When a revision publishes, the reveal shows that version's crowd and notes, for example: "Updated Oct 12; 3,104 people saw the earlier version."
 - **Abuse floor without login.** Use one session per device, rate limits per IP, and drop responses that finish faster than a reading-time floor. This holds until the verified-human system ships.
 - **Fairness signals.** User flags on facts, plus an optional end-of-dive question: "Was this fair to your side?" Both are shown per side in the admin console. A case where one side rates it unfair goes back into review.

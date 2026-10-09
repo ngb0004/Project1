@@ -13,73 +13,78 @@
     17
   ],
   "steps": {
-    "interview-vs-statement": {
-      "move_share": 0.35,
-      "mean_shift": 6,
-      "spread": 7
+    "the-night": {
+      "agree": 5,
+      "unsure": 3,
+      "disagree": 2
     },
-    "statement-reviewed-and-signed": {
-      "move_share": 0.25,
-      "mean_shift": -4,
-      "spread": 5
+    "agreed-at-first": {
+      "agree": 7,
+      "unsure": 2,
+      "disagree": 1
     },
-    "da-reviewed-statement-only": {
-      "move_share": 0.35,
-      "mean_shift": 6,
-      "spread": 7
+    "ketamine": {
+      "agree": 5,
+      "unsure": 3,
+      "disagree": 2
     },
-    "da-legal-reading": {
-      "move_share": 0.35,
-      "mean_shift": -6,
-      "spread": 7
+    "group-chat": {
+      "agree": 9,
+      "unsure": 1,
+      "disagree": 0.5
     },
-    "ithaca-police-not-told": {
-      "move_share": 0.25,
-      "mean_shift": 4,
-      "spread": 5
+    "men-say": {
+      "agree": 3,
+      "unsure": 3,
+      "disagree": 4
     },
-    "title-ix-process": {
-      "move_share": 0.35,
-      "mean_shift": -6,
-      "spread": 7
+    "first-texts": {
+      "agree": 3,
+      "unsure": 3,
+      "disagree": 4
     },
-    "sanctions-dispute": {
-      "move_share": 0.2,
-      "mean_shift": 0,
-      "spread": 5
+    "gossip": {
+      "agree": 6,
+      "unsure": 2,
+      "disagree": 2
     },
-    "lawsuit-account-differs": {
-      "move_share": 0.25,
-      "mean_shift": -4,
-      "spread": 5
+    "interview-cut": {
+      "agree": 8,
+      "unsure": 1.5,
+      "disagree": 0.5
     },
-    "faq-revised": {
-      "move_share": 0.25,
-      "mean_shift": 4,
-      "spread": 5
+    "da-decision": {
+      "agree": 8,
+      "unsure": 1,
+      "disagree": 1
     },
-    "consent-law-gap": {
-      "move_share": 0.35,
-      "mean_shift": -6,
-      "spread": 7
+    "the-law": {
+      "agree": 6,
+      "unsure": 3,
+      "disagree": 1
     },
-    "governor-replaces-da": {
-      "move_share": 0.35,
-      "mean_shift": 6,
-      "spread": 7
+    "cornell-hearing": {
+      "agree": 3,
+      "unsure": 4,
+      "disagree": 3
     },
-    "where-things-stand": {
-      "move_share": 0.15,
-      "mean_shift": 0,
-      "spread": 3
+    "governor-steps-in": {
+      "agree": 5,
+      "unsure": 3,
+      "disagree": 3
+    },
+    "threats": {
+      "agree": 7,
+      "unsure": 2,
+      "disagree": 1
     }
   },
   "after": {
-    "move_share": 0.1,
-    "mean_shift": 0,
-    "spread": 3
+    "move_share": 0.35,
+    "mean_shift": -4,
+    "spread": 8
   },
   "fade_after_real_completions": 500,
   "rng_seed": 1,
-  "note": "Draft estimate written by the research pipeline for the owner to adjust; seeded rows are flagged as seeded in the app."
+  "note": "Draft estimate for Oct. 9, 2026, written by hand: most early readers lean toward agreeing that Jane Doe was let down; the votes split most on her texts, the accused men's account, Cornell's punishments and the governor's move. Replace with real data as readers arrive; seeds fade out by 500 real completions."
 }

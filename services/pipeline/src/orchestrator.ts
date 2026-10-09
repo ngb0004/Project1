@@ -8,6 +8,7 @@ import {
   validateCase,
   weakerConfidence,
   type AgentReport,
+  type BiasFlag,
   type BiasReport,
   type Case,
   type FactCheckRow,
@@ -1803,8 +1804,8 @@ class PipelineRun {
   }
 
   /** The drafter's resolutions, matched to this round's questions, flags and gaps. */
-  private recordResolutions(resolutions: DrafterOutput['resolutions'], r: RoundCritique, questions: Map<string, QuestionRecord>) {
-    const byRef = new Map(resolutions.map((x) => [x.ref, x.resolution]));
+  private recordResolutions(resolutions: Resolution[], r: RoundCritique, questions: Map<string, QuestionRecord>) {
+    const byRef = new Map(resolutions.map((x) => [x.ref, { action: x.action, text: x.resolution }]));
     for (const q of r.hard?.questions ?? []) {
       const res = byRef.get(q.id);
       const rec = questions.get(q.id);
@@ -1819,7 +1820,8 @@ class PipelineRun {
   }
 
   private questionForReview(q: QuestionRecord): HardQuestion {
-    const resolution = [q.item.resolution, q.drafterResolution ? `Drafter: ${q.drafterResolution}` : ''].filter(Boolean).join(' ');
+    const res = q.drafterResolution;
+    const resolution = [q.item.resolution, res ? `Drafter (${res.action.replace(/_/g, ' ')}): ${res.text}` : ''].filter(Boolean).join(' ');
     return {
       ...q.item,
       round: q.firstRound,
@@ -1829,8 +1831,8 @@ class PipelineRun {
   }
 
   /** Everything that still blocks after the last round, as open issues. */
-  private unresolvedIssues(r: RoundCritique, c: DraftCase): Omit<OpenIssue, 'id'>[] {
-    const out: Omit<OpenIssue, 'id'>[] = [];
+  private unresolvedIssues(r: RoundCritique, c: DraftCase): DraftIssue[] {
+    const out: DraftIssue[] = [];
     const b = this.blocking(r);
     const stepRef = (id: string | undefined) => (id ? stepIdOf(id, c) : undefined);
     for (const q of b.questions) {
@@ -1848,6 +1850,7 @@ class PipelineRun {
         description: clip(`Red team for "${side.label}": ${flag.kind.replace(/_/g, ' ')}: ${flag.note}`, 2000),
         ...(step ? { step_id: step } : {}),
         resolved: false,
+        target: `flag:${flag.id}`,
       });
     }
     for (const row of b.factRows) {
@@ -1855,14 +1858,44 @@ class PipelineRun {
       out.push({
         source: 'fact_checker',
         severity: 'high',
-        description: clip(`Fact-check (${row.verdict}) on ${row.target}: ${row.claim}${row.note ? ` (${row.note})` : ''}`, 2000),
+        description: clip(`Fact-check (${isNotChecked(row) ? 'not checked' : row.verdict}) on ${row.target}: ${row.claim}${row.note ? ` (${row.note})` : ''}`, 2000),
         ...(step ? { step_id: step } : {}),
         resolved: false,
+        target: row.target,
       });
     }
     for (const e of b.validationErrors) out.push({ source: 'validator', severity: 'high', description: clip(e, 2000), resolved: false });
     for (const f of b.failedCritics) out.push({ source: 'pipeline', severity: 'high', description: clip(`A critic did not finish: ${f}`, 2000), resolved: false });
     return out;
+  }
+
+  /**
+   * A red-team flag's status for the review record:
+   * - before the last round: "addressed" only when the drafter says it changed
+   *   the draft for it AND the next round's red team, shown the flag, did not
+   *   raise it again; "wont_fix" when the drafter says it does not apply;
+   *   otherwise "unaddressed";
+   * - in the last round (no red team reads the result): "addressed" when the
+   *   editor says it changed the case for it and that change survived the
+   *   fact-check of the editor's changes.
+   */
+  private flagStatus(f: FlagRecord, round: number, lastRound: number, finalCheck: FinalCheck | undefined): { status: BiasFlag['status']; resolution?: string } {
+    const words = (r: ResolutionRecord) => r.action.replace(/_/g, ' ');
+    if (round < lastRound) {
+      const res = f.drafterResolution;
+      const parts = [res ? `Drafter (${words(res)}): ${res.text}` : 'The drafter did not respond to this flag.'];
+      if (f.reraised) parts.push(`The round ${round + 1} red team raised it again.`);
+      else if (res?.action === 'changed') parts.push(`The round ${round + 1} red team did not raise it again.`);
+      const status = res?.action === 'not_applicable' ? 'wont_fix' : res?.action === 'changed' && !f.reraised ? 'addressed' : 'unaddressed';
+      return { status, resolution: clip(parts.join(' '), 2000) };
+    }
+    const res = this.editorResolutions.get(f.flag.id);
+    if (!res) return { status: 'unaddressed' };
+    const stepId = f.flag.step_id;
+    const reverted = !!stepId && [...(finalCheck?.reverted.keys() ?? [])].some((t) => t === stepId || t.startsWith(`layer:${stepId}/`));
+    const text = `Editor (${words(res)}): ${res.text}${reverted ? ' The editor\'s change to this step failed the final fact-check and was put back.' : res.action === 'changed' ? ' (After the last red-team round: no red team re-read it.)' : ''}`;
+    const status = res.action === 'not_applicable' ? 'wont_fix' : res.action === 'changed' && !reverted ? 'addressed' : 'unaddressed';
+    return { status, resolution: clip(text, 2000) };
   }
 
   private assembleReview(
@@ -1873,18 +1906,22 @@ class PipelineRun {
     finalFailures: CitationFailure[],
     /** The last critiqued draft, before the editor's pass. */
     critiqued: DraftCase,
+    finalCheck?: FinalCheck,
   ): ReviewRecord {
     const sideIds = new Set(final.sides.map((s) => s.id));
+    const sideLabel = (id: string | undefined) => final.sides.find((s) => s.id === id)?.label ?? id;
     const last = rounds[rounds.length - 1];
+    const lastRound = last?.round ?? 0;
 
     const hard_questions: HardQuestion[] = [...questions.values()].map((q) => {
       const h = this.questionForReview(q);
-      // A question the hard-questions agent stopped asking after the drafter answered it counts as answered.
-      if (h.status === 'open' && q.drafterResolution && last && q.lastRound < last.round) h.status = 'answered';
+      // Answered when the drafter says it changed the draft for it and the hard-questions agent stopped asking.
+      if (h.status === 'open' && q.drafterResolution?.action === 'changed' && last && q.lastRound < last.round) h.status = 'answered';
       if (h.side_id && !sideIds.has(h.side_id)) delete h.side_id;
       return h;
     });
 
+    const flagIssues = new Map<string, DraftIssue>();
     const bias_reports: BiasReport[] = rounds.flatMap((r) =>
       r.redTeams
         .filter((t) => t.out && sideIds.has(t.side.id))
@@ -1892,11 +1929,29 @@ class PipelineRun {
           side_id: t.side.id,
           round: r.round,
           summary: clip(t.out!.summary, 4000),
-          flags: t.flags.map((f) => ({
-            ...f.flag,
-            status: f.drafterResolution ? ('addressed' as const) : ('unaddressed' as const),
-            ...(f.drafterResolution ? { resolution: clip(f.drafterResolution, 2000) } : {}),
-          })),
+          flags: t.flags.map((f) => {
+            const { status, resolution } = this.flagStatus(f, r.round, lastRound, finalCheck);
+            // The latest copy of each flag decides whether the admin must look at it: a medium or high flag still
+            // unaddressed after the last round, or one the drafter left for the admin.
+            const key = `${t.side.id}\u0000${f.flag.id}`;
+            flagIssues.delete(key);
+            const forAdmin = r.round === lastRound || f.drafterResolution?.action === 'needs_admin';
+            if (status === 'unaddressed' && f.flag.severity !== 'low' && forAdmin && !f.reraised) {
+              const step = f.flag.step_id ? stepIdOf(f.flag.step_id, final) : undefined;
+              flagIssues.set(key, {
+                source: 'red_team',
+                severity: f.flag.severity,
+                description: clip(
+                  `Red team for "${t.side.label}" (round ${r.round}, not addressed): ${f.flag.kind.replace(/_/g, ' ')}: ${f.flag.note}${resolution ? ` ${resolution}` : ''}`,
+                  2000,
+                ),
+                ...(step ? { step_id: step } : {}),
+                resolved: false,
+                target: `flag:${f.flag.id}`,
+              });
+            }
+            return { ...f.flag, status, ...(resolution ? { resolution } : {}) };
+          }),
         })),
     );
 
@@ -1904,15 +1959,19 @@ class PipelineRun {
       ...r.factRows.map((row) => ({ ...row, round: r.round })),
       ...r.citations.map((f) => ({ ...f, note: clip(`Deterministic check: ${f.note}`, 2000), round: r.round })),
     ]);
+    fact_check.push(...(finalCheck?.rows ?? []).map((row) => ({ ...row, round: lastRound })));
     // Failures the final checks still find that the last round did not record (e.g. after an editor fallback).
     const recorded = new Set((last?.citations ?? []).map(failureKey));
-    const lastRound = last?.round ?? 0;
     for (const f of finalFailures) {
       if (!recorded.has(failureKey(f))) fact_check.push({ ...f, note: clip(`Deterministic check (final): ${f.note}`, 2000), round: lastRound });
     }
 
-    const open: Omit<OpenIssue, 'id'>[] = [...this.issues];
-    if (!clean && last) open.push(...this.unresolvedIssues(last, final));
+    const open: DraftIssue[] = [...this.issues];
+    const blockingHigh = !clean && last ? this.unresolvedIssues(last, final) : [];
+    open.push(...blockingHigh);
+    const already = new Set(blockingHigh.map((o) => o.target).filter(Boolean));
+    for (const issue of flagIssues.values()) if (!already.has(issue.target)) open.push(issue);
+
     // A partly supported claim does not block the loop (its confidence is downgraded and the editor is told
     // to narrow it), but the admin sees each one the last round still found.
     for (const row of last?.factRows.filter((x) => x.verdict === 'partially_supported') ?? []) {
@@ -1926,6 +1985,26 @@ class PipelineRun {
         ),
         ...(step ? { step_id: step } : {}),
         resolved: false,
+        target: row.target,
+      });
+    }
+    // Downgrades not applied because the row's claim is not in the step's own text: the admin checks the label
+    // and whether the step still needs that citation.
+    for (const row of [...(last?.skippedDowngrades ?? []), ...(finalCheck?.skippedDowngrades ?? [])]) {
+      const step = stepIdOf(row.target, final);
+      const item = row.target.startsWith('fact:') ? final.starting_facts.find((f) => `fact:${f.id}` === row.target) : final.steps.find((x) => x.id === row.target);
+      if (!item) continue;
+      open.push({
+        source: 'fact_checker',
+        severity: 'medium',
+        description: clip(
+          `Fact-check on ${row.target}${row.source_id ? ` (source ${row.source_id})` : ''}: the fact-checker suggested "${row.confidence_after}" for "${clip(row.claim, 300)}", ` +
+            `which the item's own text does not state, so its label stays "${item.confidence}". If the item cites ${row.source_id ?? 'that source'} only for that detail, remove the citation and its evidence; otherwise relabel it.`,
+          2000,
+        ),
+        ...(step ? { step_id: step } : {}),
+        resolved: false,
+        target: row.target,
       });
     }
     const seen = new Set(open.filter((o) => o.source === 'fact_checker').map((o) => o.description));
@@ -1937,13 +2016,62 @@ class PipelineRun {
       open.push({ source: 'fact_checker', severity: 'high', description, ...(step ? { step_id: step } : {}), resolved: false });
     }
 
-    // The critics saw the draft before the editor's pass. When the editor then changed a flagged step, say so:
-    // the finding may already be fixed (or made worse), and no critic has checked the edited text.
+    // Hard questions still open at the end: blocking ones already counted above stay as they are; the rest
+    // reach the admin too (medium when blocking, low otherwise).
+    const blockingQuestions = new Set(blockingHigh.filter((o) => o.source === 'hard_questions').map((o) => o.description));
+    for (const q of hard_questions.filter((x) => x.status === 'open')) {
+      if (blockingQuestions.has(clip(`Unanswered blocking question: ${q.question}`, 2000))) continue;
+      const step = q.step_ids.map((x) => stepIdOf(x, final)).find(Boolean);
+      open.push({
+        source: 'hard_questions',
+        severity: q.blocking ? 'medium' : 'low',
+        description: clip(`Open question${q.side_id ? ` (skeptic for "${sideLabel(q.side_id)}")` : ''}: ${q.question}${q.resolution ? ` ${q.resolution}` : ''}`, 2000),
+        ...(step ? { step_id: step } : {}),
+        resolved: false,
+      });
+    }
+    // What the researchers and the drafter could not find: research gaps for the admin (never shown to readers).
+    for (const [scope, gaps] of this.researchGaps) {
+      if (!gaps.length) continue;
+      open.push({
+        source: 'pipeline',
+        severity: gaps.some((g) => g.blocking) ? 'medium' : 'low',
+        description: clip(
+          `Research gaps reported by the ${scope === RECORDS_SCOPE ? 'records' : `"${sideLabel(scope)}"`} researcher: ` +
+            gaps.map((g, i) => `(${i + 1}) ${g.description}${g.blocking ? ' [blocking]' : ''}`).join(' '),
+          2000,
+        ),
+        resolved: false,
+      });
+    }
+    if (this.drafterGaps.length) {
+      open.push({
+        source: 'pipeline',
+        severity: 'low',
+        description: clip(`Facts the drafter needed and no claim supplied: ${this.drafterGaps.map((g, i) => `(${i + 1}) ${g}`).join(' ')}`, 2000),
+        resolved: false,
+      });
+    }
+
+    // The critics saw the draft before the editor's pass. When the editor changed an item a finding is about, say
+    // what happened next: the fact-check of the editor's changes resolved it, put the change back, or did not run.
     const before = new Map(critiqued.steps.map((st) => [st.id, JSON.stringify({ ...st, order: 0 })]));
     const editedSteps = new Set(final.steps.filter((st) => before.get(st.id) !== JSON.stringify({ ...st, order: 0 })).map((st) => st.id));
+    const revertedSteps = new Set([...(finalCheck?.reverted.keys() ?? [])].map((t) => stepIdOf(t, critiqued)).filter(Boolean));
     for (const o of open) {
-      if (o.step_id && editedSteps.has(o.step_id) && o.source !== 'editor' && o.source !== 'pipeline' && !o.description.startsWith('Citation check')) {
-        o.description = clip(`${o.description} The editor revised this step after this finding; no critic re-checked the edited text.`, 2000);
+      if (o.source === 'editor' || o.source === 'pipeline' || o.description.startsWith('Citation check')) continue;
+      if (finalCheck?.ran && o.source === 'fact_checker' && o.target && finalCheck.passed.has(o.target)) {
+        o.resolved = true;
+        o.description = clip(`${o.description} Resolved: the editor revised this item and the fact-check of its changes found it supported.`, 2000);
+        continue;
+      }
+      if (o.step_id && revertedSteps.has(o.step_id)) {
+        o.description = clip(`${o.description} The editor's change to this step failed the fact-check of its changes and was put back, so this finding stands.`, 2000);
+      } else if (o.step_id && editedSteps.has(o.step_id)) {
+        o.description = clip(
+          `${o.description} The editor revised this step after this finding; ${finalCheck?.ran ? 'the fact-check of its changes found the facts supported, but no red team or hard-questions agent re-read it.' : 'no critic re-checked the edited text.'}`,
+          2000,
+        );
       }
     }
 
@@ -1956,7 +2084,7 @@ class PipelineRun {
       bias_reports,
       fact_check,
       balance: toBalanceSummary(computeBalance(parsed)),
-      open_issues: open.map((o, i) => ({ id: `oi-${i + 1}`, ...o })),
+      open_issues: open.map(({ target: _t, ...o }, i) => ({ id: `oi-${i + 1}`, ...o })),
       decisions: [],
     };
   }

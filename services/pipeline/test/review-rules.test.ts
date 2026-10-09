@@ -326,3 +326,12 @@ describe('the loop limit', () => {
     expect((runner.callsTo('hard_questions')[0]!.input as HardQuestionsInput).must_answer).toContain(statusItem(AS_OF));
   });
 });
+
+describe('--max-rounds', () => {
+  it('accepts a whole number from 1 to 3 only', async () => {
+    const { roundsFrom } = await import('../src/cli');
+    expect(roundsFrom(undefined)).toBeUndefined();
+    expect(roundsFrom('2')).toBe(2);
+    for (const bad of ['0', '4', '7', 'abc', '1.5']) expect(() => roundsFrom(bad), bad).toThrow(/whole number from 1 to 3/);
+  });
+});

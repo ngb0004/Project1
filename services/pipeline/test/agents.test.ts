@@ -136,7 +136,9 @@ describe('agent specs', () => {
 describe('output schemas', () => {
   it('accept a real case as a draft, and the drafter output around it', () => {
     expect(DraftCase.safeParse({ ...draftOnly(harbor), status: 'draft' }).success).toBe(true);
-    expect(DrafterOutput.safeParse({ case: draft, resolutions: [{ ref: 'admin', resolution: 'Applied.' }] }).success).toBe(true);
+    expect(DrafterOutput.safeParse({ case: draft, resolutions: [{ ref: 'admin', action: 'changed', resolution: 'Applied.' }] }).success).toBe(true);
+    // Every resolution says what was done: a reply alone is not a fix.
+    expect(DrafterOutput.safeParse({ case: draft, resolutions: [{ ref: 'admin', resolution: 'Applied.' }] }).success).toBe(false);
     // The review record belongs to the orchestrator, never to the drafter.
     expect(DraftCase.safeParse({ ...draft, review: {} }).success).toBe(false);
   });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CaseInput } from '@sia/case-schema';
-import { checkCitations } from '../src/factcheck';
+import { checkCitations, quoteLayerProblem } from '../src/factcheck';
 import { URLS, memoryStore } from './helpers';
 
 const poll = { prompt: 'Does this change your position?', re_ask_slider: true as const };
@@ -142,5 +142,49 @@ describe('checkCitations', () => {
     const c = caseFixture();
     c.sources.push({ id: 'src-extra', title: 'Extra', publisher: 'X', url: 'https://example.org/never-opened', date: '2025', type: 'news', accessed_at: '2026-10-01T00:00:00Z' });
     expect(checkCitations(c, await openedStore())).toEqual([expect.objectContaining({ target: 'source:src-extra', verdict: 'source_unavailable' })]);
+  });
+});
+
+describe('quote layers (deterministic)', () => {
+  const SNAP = [
+    'Reddington wrote that no "rational jury could find beyond a reasonable doubt that she had no mental disease or defect."',
+    'For example, he said, the driver followed the rules of the road on the way to the store.',
+    '"We made the best choice we could with the money we had," council chair Dana Price said.',
+    'Investigators found no "Evidence of planning anywhere in the house," the report said.',
+  ].join(' ');
+  const pubs = ['example news'];
+
+  it('fails a quote that starts mid-sentence or cuts a negation off its start', () => {
+    expect(quoteLayerProblem({ speaker: 'Kevin Reddington, defense attorney', text: 'rational jury could find beyond a reasonable doubt that she had no mental disease or defect.' }, [SNAP], pubs)).toMatch(
+      /starts mid-sentence/,
+    );
+    expect(quoteLayerProblem({ speaker: 'Lead investigator', text: 'Evidence of planning anywhere in the house' }, [SNAP], pubs)).toMatch(
+      /cuts a negation off its start: the source has "no"/,
+    );
+  });
+
+  it('fails a publication as the speaker, narration, or a note in the speaker field', () => {
+    expect(quoteLayerProblem({ speaker: 'Example News, describing testimony of Dr. Mack', text: 'For example, he said, the driver followed the rules of the road' }, [SNAP], pubs)).toMatch(/publication or its narration/);
+    expect(quoteLayerProblem({ speaker: 'The Example News', text: 'For example, he said, the driver followed the rules of the road' }, [SNAP], pubs)).toMatch(/publication/);
+    expect(quoteLayerProblem({ speaker: 'Dana Price (quoted after the word "no")', text: 'We made the best choice we could with the money we had' }, [SNAP], pubs)).toMatch(/parentheses/);
+  });
+
+  it('passes a whole quote from a named person with a name and role', () => {
+    expect(quoteLayerProblem({ speaker: 'Dana Price, council chair', text: 'We made the best choice we could with the money we had' }, [SNAP], pubs)).toBeNull();
+    // A court or agency speaking in its own record is not a news publication.
+    expect(quoteLayerProblem({ speaker: 'County', text: 'We made the best choice we could with the money we had' }, [SNAP], pubs)).toBeNull();
+  });
+
+  it('checkCitations reports a misleading quote layer as unsupported', () => {
+    const c = caseFixture();
+    const layer = c.steps![0]!.depth![0]!;
+    if (layer.kind !== 'quote') throw new Error('fixture');
+    layer.speaker = 'Dana Price (in a statement)';
+    const { store } = memoryStore();
+    return Promise.all([URLS.minutes, URLS.breakNews, URLS.grants].map((u) => store.open(u, 'researcher'))).then(() => {
+      expect(checkCitations(c, store)).toEqual([
+        expect.objectContaining({ target: 'layer:s1/q1', verdict: 'unsupported', source_id: 'src-news', note: expect.stringContaining('parentheses') }),
+      ]);
+    });
   });
 });

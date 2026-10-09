@@ -271,7 +271,7 @@ describe('runCasePipeline (live updates)', () => {
       const out = buildDraft({ ...input, claims: [] as ResearchClaim[] }, ctx);
       out.case.steps = structuredClone(live.steps);
       out.case.sources = structuredClone(live.sources);
-      return { case: out.case, resolutions: input.update!.developments.map((ref) => ({ ref, resolution: 'Left out: the audit does not bear on the 2025 vote.' })) };
+      return { case: out.case, resolutions: input.update!.developments.map((ref) => ({ ref, action: 'not_changed' as const, resolution: 'Left out: the audit does not bear on the 2025 vote.' })) };
     };
     const { result } = await update(live, { ...quiet, records_researcher: researcherScript([AUDIT]), drafter: keep });
     expect(result.kind).toBe('no_changes');

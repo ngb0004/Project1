@@ -459,11 +459,30 @@ const RECORDS_SPECS: PageClaim[] = [
 /** Researcher scripts that open the fixture pages through the tools (the real fetch) and log their claims. */
 const researching = (specs: PageClaim[]) => researcherScript(specs.map(({ path, ...s }) => ({ ...s, url: url(path) })));
 
-/** A fact-checker that marks every item supported without reading anything: the worst case for an LLM. */
-const rubberStampFactChecker: FakeScript = (input: FactCheckerInput): FactCheckerOutput => ({
-  rows: factCheckTargets(input.draft).flatMap((t) =>
-    t.source_ids.map((sid) => ({ target: t.target, claim: t.text.slice(0, 2000), source_id: sid, verdict: 'supported' as const, note: 'Looks fine.' })),
-  ),
+/**
+ * A fact-checker that opens every cited snapshot but marks every item supported whatever it says: the worst
+ * case for an LLM that does read (one that does not read is caught by the coverage rule, below).
+ */
+const rubberStampFactChecker: FakeScript = (input: FactCheckerInput, _ctx: AgentContext, tools: ResearchTools): FactCheckerOutput => {
+  const snaps = new Map(input.sources.map((s) => [s.source_id, s.snapshot_id]));
+  return {
+    rows: factCheckTargets(input.draft)
+      .filter((t) => !input.only || input.only.includes(t.target))
+      .flatMap((t) =>
+        t.source_ids.map((sid) => {
+          const snap = snaps.get(sid);
+          if (snap) tools.readSource(snap, 0, 20_000);
+          return { target: t.target, claim: t.text.slice(0, 2000), source_id: sid, verdict: 'supported' as const, note: 'Looks fine.' };
+        }),
+      ),
+  };
+};
+
+/** A fact-checker that marks every item supported without reading anything. */
+const blindFactChecker: FakeScript = (input: FactCheckerInput): FactCheckerOutput => ({
+  rows: factCheckTargets(input.draft)
+    .filter((t) => !input.only || input.only.includes(t.target))
+    .flatMap((t) => t.source_ids.map((sid) => ({ target: t.target, claim: t.text.slice(0, 2000), source_id: sid, verdict: 'supported' as const, note: 'Looks fine.' }))),
 });
 
 /**
@@ -475,6 +494,7 @@ function judgingFactChecker(planted: Pick<FactCheckItem, 'verdict' | 'note' | 'c
     const snaps = new Map(input.sources.map((s) => [s.source_id, s.snapshot_id]));
     const rows: FactCheckItem[] = [];
     for (const t of factCheckTargets(input.draft)) {
+      if (input.only && !input.only.includes(t.target)) continue;
       for (const sid of t.source_ids) {
         const snap = snaps.get(sid);
         if (snap) tools.readSource(snap, 0, 20_000);
@@ -539,6 +559,25 @@ describe('the orchestrator with a planted claim (real fetch, scripted agents)', 
   ] as const) {
     it(`variant ${variant}: fails in every round even when the LLM fact-checker misses it, and reaches the admin as a high open issue`, async () => {
       const { pkg, store } = await runPipeline(scripts({ variant, factChecker: rubberStampFactChecker }));
+      if (variant === 'unopened_source') {
+        // A source never opened in this run never ships: the package drops it, and the step that relied on it alone.
+        expect(pkg.clean).toBe(false);
+        expect(pkg.rounds).toBe(3);
+        const rows = pkg.review.fact_check.filter((r) => r.target === PLANTED && r.verdict === verdict);
+        expect(rows.map((r) => r.round)).toEqual([1, 2, 3]);
+        expect(pkg.case.steps.some((st) => st.id === PLANTED)).toBe(false);
+        expect(pkg.case.sources.some((x) => x.id === 'src-letters')).toBe(false);
+        expect(pkg.review.open_issues).toContainEqual(
+          expect.objectContaining({ source: 'fact_checker', severity: 'high', description: expect.stringMatching(/Removed s-planted .*never opened/) }),
+        );
+        expect(pkg.review.open_issues).toContainEqual(
+          expect.objectContaining({ source: 'fact_checker', severity: 'high', description: expect.stringMatching(/Source "src-letters" .* was cited but never opened/) }),
+        );
+        expect(validateCase(pkg.case).ok).toBe(true);
+        expect(checkCitations(pkg.case, store)).toEqual([]);
+        for (const x of pkg.case.sources) expect(store.findByUrl(x.url)?.status, x.url).toBe(200);
+        return;
+      }
       expect(pkg.clean).toBe(false);
       expect(pkg.rounds).toBe(3);
 
@@ -590,9 +629,9 @@ describe('the orchestrator with a planted claim (real fetch, scripted agents)', 
     expect(runner.callsTo('fact_checker').every((c) => c.access === 'read_sources')).toBe(true);
   });
 
-  it('variant misused_quote: when the editor changes the flagged step after the last round, the open issue says no critic re-checked it', async () => {
+  it('variant misused_quote: an editor change that still fails the fact-check of its changes is put back, and the finding stands', async () => {
     const unsupported = judgingFactChecker({ verdict: 'unsupported', note: 'The minutes record a 5-4 vote to postpone, not a unanimous vote to cancel.' });
-    const { pkg } = await runPipeline({
+    const { pkg, runner } = await runPipeline({
       ...scripts({ variant: 'misused_quote', factChecker: unsupported }),
       editor: editorScript((d) => {
         const st = d.steps.find((x) => x.id === PLANTED)!;
@@ -600,11 +639,76 @@ describe('the orchestrator with a planted claim (real fetch, scripted agents)', 
         return d;
       }),
     });
-    const issue = pkg.review.open_issues.find((o) => o.step_id === PLANTED && o.source === 'fact_checker');
-    expect(issue?.description).toMatch(/unsupported.*The editor revised this step after this finding; no critic re-checked the edited text\./);
-    // Steps the editor left alone carry no such note.
-    const { pkg: untouched } = await runPipeline(scripts({ variant: 'misused_quote', factChecker: unsupported }));
-    expect(untouched.review.open_issues.some((o) => o.description.includes('editor revised'))).toBe(false);
+    // The fact-checker ran once more after the editor, on the changed step only.
+    const final = runner.callsTo('fact_checker', { round: 3 }).at(-1)!;
+    expect((final.input as FactCheckerInput).only).toEqual([PLANTED]);
+    expect(pkg.case.steps.find((x) => x.id === PLANTED)!.headline).toBe('The council voted unanimously to cancel the Elm Street replacement project.');
+    const issue = pkg.review.open_issues.find((o) => o.step_id === PLANTED && o.source === 'fact_checker' && o.severity === 'high');
+    expect(issue?.description).toMatch(/unsupported.*failed the fact-check of its changes and was put back, so this finding stands\./);
+    expect(issue?.resolved).toBe(false);
+    expect(pkg.review.open_issues).toContainEqual(
+      expect.objectContaining({ source: 'editor', severity: 'medium', step_id: PLANTED, description: expect.stringContaining('was put back as the last fact-checked draft had it') }),
+    );
+    expect(pkg.review.fact_check.some((r) => r.target === PLANTED && r.note?.startsWith('Final check after the editor:'))).toBe(true);
+    // Steps the editor left alone carry no such note, and no final fact-check runs.
+    const { pkg: untouched, runner: r2 } = await runPipeline(scripts({ variant: 'misused_quote', factChecker: unsupported }));
+    expect(untouched.review.open_issues.some((o) => o.description.includes('editor'))).toBe(false);
+    expect(r2.callsTo('fact_checker')).toHaveLength(3);
+  });
+
+  it('variant misused_quote: an editor fix that passes the fact-check of its changes ships, and the finding is marked resolved', async () => {
+    const PLANTED_TEXT = 'The council voted unanimously to cancel';
+    // Unsupported while the step says "unanimously to cancel"; supported once the text matches the minutes.
+    const fc: FakeScript = (input: FactCheckerInput, ctx: AgentContext, tools: ResearchTools) => {
+      const step = input.draft.steps?.find((x) => x.id === PLANTED);
+      const planted = !!step && step.headline.startsWith(PLANTED_TEXT);
+      const judge = judgingFactChecker(planted ? { verdict: 'unsupported', note: 'The minutes record a 5-4 vote to postpone.' } : { verdict: 'supported', note: 'The minutes say this.' });
+      return (judge as (i: FactCheckerInput, c: AgentContext, t: ResearchTools) => FactCheckerOutput)(input, ctx, tools);
+    };
+    const { pkg } = await runPipeline({
+      ...scripts({ variant: 'misused_quote', factChecker: fc }),
+      editor: editorScript((d) => {
+        const st = d.steps.find((x) => x.id === PLANTED)!;
+        st.headline = 'The council voted 5-4 to postpone the Elm Street replacement project.';
+        st.body = 'According to the June 3, 2025 minutes, the council voted 5-4 to postpone the replacement project to the 2027 budget.';
+        return d;
+      }),
+    });
+    expect(pkg.case.steps.find((x) => x.id === PLANTED)!.headline).toBe('The council voted 5-4 to postpone the Elm Street replacement project.');
+    const issue = pkg.review.open_issues.find((o) => o.step_id === PLANTED && o.source === 'fact_checker' && o.severity === 'high');
+    expect(issue?.resolved).toBe(true);
+    expect(issue?.description).toMatch(/Resolved: the editor revised this item and the fact-check of its changes found it supported\./);
+  });
+
+  it('a fact-checker that reads nothing, or returns no rows, does not pass the draft: every unchecked pair blocks and reaches the admin', async () => {
+    for (const factChecker of [blindFactChecker, { rows: [] } as FakeScript]) {
+      const { pkg, runner } = await runPipeline(scripts({ variant: null, factChecker }));
+      expect(pkg.clean).toBe(false);
+      expect(pkg.rounds).toBe(3);
+      // Each round asked once more for the unchecked pairs.
+      expect(runner.callsTo('fact_checker').map((c) => c.round)).toEqual([1, 1, 2, 2, 3, 3]);
+      const second = runner.callsTo('fact_checker', { round: 1 })[1]!.input as FactCheckerInput;
+      expect(second.only?.length).toBeGreaterThan(0);
+      const rows = pkg.review.fact_check.filter((r) => r.round === 3 && r.note?.startsWith('Not checked:'));
+      const pairs = factCheckTargets(pkg.case).reduce((n, t) => n + t.source_ids.length, 0);
+      expect(rows.length).toBe(pairs);
+      expect(rows.every((r) => r.verdict === 'uncited')).toBe(true);
+      const issues = pkg.review.open_issues.filter((o) => o.description.startsWith('Fact-check (not checked)'));
+      expect(issues.length).toBe(pairs);
+      expect(issues.every((o) => o.severity === 'high' && !o.resolved)).toBe(true);
+    }
+  });
+
+  it('a supported row whose quoted passage is not in the source counts as not checked', async () => {
+    const madeUpQuotes: FakeScript = (input: FactCheckerInput, ctx: AgentContext, tools: ResearchTools) => {
+      const out = (rubberStampFactChecker as (i: FactCheckerInput, c: AgentContext, t: ResearchTools) => FactCheckerOutput)(input, ctx, tools);
+      return { rows: out.rows.map((r) => (r.target === 's1' ? { ...r, quote: 'The council said nothing of the kind about this item at any time.' } : r)) };
+    };
+    const { pkg } = await runPipeline(scripts({ variant: null, factChecker: madeUpQuotes }));
+    expect(pkg.clean).toBe(false);
+    expect(pkg.review.open_issues).toContainEqual(
+      expect.objectContaining({ step_id: 's1', severity: 'high', description: expect.stringContaining('is not in that source') }),
+    );
   });
 
   it('variant misused_quote: "partially supported" downgrades the step and still reaches the admin', async () => {

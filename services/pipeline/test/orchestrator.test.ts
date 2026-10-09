@@ -140,7 +140,7 @@ describe('runCasePipeline (new case)', () => {
     const q = pkg.review.hard_questions.find((x) => x.id === 'hq-r1-1')!;
     expect(q.status).toBe('answered');
     expect(q.round).toBe(1);
-    expect(q.resolution).toContain('Drafter: Addressed in the revision.');
+    expect(q.resolution).toContain('Drafter (changed): Addressed in the revision.');
     expect(pkg.review.open_issues).toEqual([]);
   });
 
@@ -162,10 +162,13 @@ describe('runCasePipeline (new case)', () => {
     expect(sources).toEqual(['hard_questions', 'red_team']);
     expect(pkg.review.open_issues.every((o) => o.severity === 'high' && !o.resolved)).toBe(true);
     expect(pkg.review.open_issues.find((o) => o.source === 'red_team')?.description).toContain('order effect');
-    // Earlier rounds' flags were addressed by the drafter; the last round's are not.
+    // The drafter answered the flag each round, but the next round's red team (shown its own flag) raised it
+    // again, so it is never recorded as addressed.
     const reports = pkg.review.bias_reports.filter((b) => b.side_id === SIDE_B.id);
     expect(reports.map((b) => b.round)).toEqual([1, 2, 3]);
-    expect(reports.map((b) => b.flags[0]!.status)).toEqual(['addressed', 'addressed', 'unaddressed']);
+    expect(reports.map((b) => b.flags[0]!.status)).toEqual(['unaddressed', 'unaddressed', 'unaddressed']);
+    expect(reports[0]!.flags[0]!.resolution).toMatch(/^Drafter \(changed\): Addressed in the revision\. The round 2 red team raised it again\.$/);
+    expect(runner.callsTo('red_team', { scope: SIDE_B.id, round: 2 })[0]!.input).toMatchObject({ previous_flags: [highFlagRedTeam.flags[0]] });
     expect(validateCase(pkg.case).ok).toBe(true);
   });
 
@@ -181,7 +184,11 @@ describe('runCasePipeline (new case)', () => {
     expect(reds).toHaveLength(6); // 2 sides x 3 rounds, one call each
     for (const c of reds) {
       const input = c.input as Record<string, unknown>;
-      expect(Object.keys(input).sort()).toEqual(['draft', 'side', 'sources']);
+      // Rounds 2 and 3 also get the red team's own flags on the previous draft (its output, not the drafter's).
+      expect(Object.keys(input).sort()).toEqual(c.round === 1 ? ['draft', 'side', 'sources'] : ['draft', 'previous_flags', 'side', 'sources']);
+      for (const f of (input.previous_flags as Record<string, unknown>[] | undefined) ?? []) {
+        expect(Object.keys(f).sort()).toEqual(['id', 'kind', 'note', 'severity']);
+      }
       const draft = input.draft as Record<string, unknown>;
       expect(draft).not.toHaveProperty('review');
       expect(draft).not.toHaveProperty('resolutions');

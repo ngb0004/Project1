@@ -29,7 +29,7 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { signInStaff } from '@sia/case-store';
-import { runCasePipeline, toLocalId } from './orchestrator';
+import { MAX_ROUNDS, runCasePipeline, toLocalId } from './orchestrator';
 import { checkSavedPackage, manifestOf, writeAuditDir, writePackageToDir } from './package';
 import { FileResearchLog } from './research/log';
 import { SourceStore } from './research/store';
@@ -102,10 +102,11 @@ export function secondsFrom(name: string, raw: string | undefined, fallbackSecon
   return n * 1000;
 }
 
-function roundsFrom(raw: string | undefined): number | undefined {
+/** Critic-loop rounds: a whole number from 1 to 3 (the spec's loop stops at 3 rounds). */
+export function roundsFrom(raw: string | undefined): number | undefined {
   if (raw === undefined || raw === '') return undefined;
   const n = Number(raw);
-  if (!Number.isInteger(n) || n < 1 || n > 10) throw new Error(`--max-rounds must be a whole number from 1 to 10, got "${raw}"`);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_ROUNDS) throw new Error(`--max-rounds must be a whole number from 1 to ${MAX_ROUNDS}, got "${raw}"`);
   return n;
 }
 
@@ -127,6 +128,7 @@ async function cmdRun(argv: string[]): Promise<number> {
   const fileLog = new FileResearchLog(dir);
   const store = new SourceStore({ log: fileLog });
   const budgetUsd = budgetFrom(values['budget-usd']);
+  const maxRounds = roundsFrom(values['max-rounds']);
   log(`run ${runId}: "${brief}" (budget $${budgetUsd}) -> ${dir}`);
   const result = await runCasePipeline(
     { kind: 'new_case', brief },
@@ -135,7 +137,7 @@ async function cmdRun(argv: string[]): Promise<number> {
       store,
       runId,
       budgetUsd,
-      ...(values['max-rounds'] ? { maxRounds: Number(values['max-rounds']) } : {}),
+      ...(maxRounds ? { maxRounds } : {}),
       onProgress: log,
     },
   );

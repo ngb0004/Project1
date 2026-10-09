@@ -65,7 +65,7 @@ runs.
 Import the Cornell case into the review queue (it is not published):
 
 ```sh
-SUPABASE_URL=https://sbzxnzlfgiqiwgyagdet.supabase.co SUPABASE_ANON_KEY=<publishable key> \
+SUPABASE_URL=https://sbzxnzlfgiqiwgyagdet.supabase.co SUPABASE_ANON_KEY=sb_publishable_bLglFGR3PAnCNehrsZMg_Q_7k3v_iuR \
 SIA_STAFF_EMAIL=<owner email> SIA_STAFF_PASSWORD=... \
   pnpm --filter @sia/supabase import-case ../cases/seed/cornell.json --seed-profile ../cases/seed/cornell.seed-profile.json
 ```
@@ -80,7 +80,7 @@ for env in preview production; do
   npx eas-cli env:set --environment $env --name EXPO_PUBLIC_SUPABASE_URL \
     --value https://sbzxnzlfgiqiwgyagdet.supabase.co --visibility plaintext --non-interactive
   npx eas-cli env:set --environment $env --name EXPO_PUBLIC_SUPABASE_ANON_KEY \
-    --value <publishable key> --visibility plaintext --non-interactive
+    --value sb_publishable_bLglFGR3PAnCNehrsZMg_Q_7k3v_iuR --visibility plaintext --non-interactive
 done
 npx eas-cli build --platform android --profile preview --non-interactive
 ```

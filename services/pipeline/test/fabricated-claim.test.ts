@@ -164,7 +164,7 @@ function realStore() {
 // ---------------------------------------------------------------------------
 
 const MICRO_POLL = { prompt: 'Does this change your position?', re_ask_slider: true as const };
-export const PLANTED = 's-planted';
+const PLANTED = 's-planted';
 
 type Step = DraftCase['steps'][number];
 
@@ -436,19 +436,20 @@ describe('a planted claim against the deterministic citation check (real fetch, 
 // ---------------------------------------------------------------------------
 
 const SIDE_A_SPECS = [
-  { url: '', path: P.minutes, quote: 'The council voted 5-4 to postpone the replacement project to the 2027 budget.', text: 'The council voted 5-4 in June 2025 to postpone the replacement.', type: 'official' as const, favors: SIDE_A.id, impact: 'high' as const },
-  { url: '', path: P.inspection, quote: 'Condition rating: poor.', text: 'A 2024 inspection rated the main poor.', type: 'official' as const, favors: SIDE_A.id },
+  { path: P.minutes, quote: 'The council voted 5-4 to postpone the replacement project to the 2027 budget.', text: 'The council voted 5-4 in June 2025 to postpone the replacement.', type: 'official' as const, favors: SIDE_A.id, impact: 'high' as const },
+  { path: P.inspection, quote: 'Condition rating: poor.', text: 'A 2024 inspection rated the main poor.', type: 'official' as const, favors: SIDE_A.id },
 ];
 const SIDE_B_SPECS = [
-  { url: '', path: P.grants, quote: 'The state reduced local water infrastructure grants by 40 percent for the 2025 fiscal year.', text: 'The state cut water grants by 40 percent in 2025.', type: 'official' as const, favors: SIDE_B.id, impact: 'high' as const },
-  { url: '', path: P.analysis, quote: 'Maple County deferred two of its five planned water projects in 2025', text: 'The county deferred two of five water projects in 2025.', type: 'analysis' as const, favors: SIDE_B.id },
+  { path: P.grants, quote: 'The state reduced local water infrastructure grants by 40 percent for the 2025 fiscal year.', text: 'The state cut water grants by 40 percent in 2025.', type: 'official' as const, favors: SIDE_B.id, impact: 'high' as const },
+  { path: P.analysis, quote: 'Maple County deferred two of its five planned water projects in 2025', text: 'The county deferred two of five water projects in 2025.', type: 'analysis' as const, favors: SIDE_B.id },
 ];
 const RECORDS_SPECS = [
-  { url: '', path: P.breaks, quote: 'The Elm Street water main broke on September 12, 2025, closing three blocks for four days.', text: 'The main broke on September 12, 2025.', type: 'news' as const, favors: 'neutral' },
+  { path: P.breaks, quote: 'The Elm Street water main broke on September 12, 2025, closing three blocks for four days.', text: 'The main broke on September 12, 2025.', type: 'news' as const, favors: 'neutral' },
 ];
 
 /** Researcher scripts that open the fixture pages through the tools (the real fetch) and log their claims. */
-const researching = (specs: typeof SIDE_A_SPECS | typeof RECORDS_SPECS) => researcherScript(specs.map(({ path, ...s }) => ({ ...s, url: url(path) })));
+const researching = (specs: Array<(typeof SIDE_A_SPECS)[number] | (typeof RECORDS_SPECS)[number]>) =>
+  researcherScript(specs.map(({ path, ...s }) => ({ ...s, url: url(path) })));
 
 /** A fact-checker that marks every item supported without reading anything: the worst case for an LLM. */
 const rubberStampFactChecker: FakeScript = (input: FactCheckerInput): FactCheckerOutput => ({
@@ -492,7 +493,7 @@ function scripts(opts: { variant: Variant | null; factChecker: FakeScript; plant
     records_researcher: researching(RECORDS_SPECS),
     // The drafter writes the clean dive from the opened pages and plants the claim (in every revision too, unless told otherwise).
     drafter: (input: { previous?: unknown }) => {
-      const planting = opts.variant && (opts.plantInRevisions ?? true ? true : !input.previous);
+      const planting = opts.variant !== null && (opts.plantInRevisions !== false || !input.previous);
       return { case: planting ? plant(cleanDraft(), opts.variant!) : cleanDraft(), resolutions: [] };
     },
     hard_questions: cleanHardQuestions,

@@ -7,26 +7,30 @@
   "version": 1,
   "as_of": "2026-09-30",
   "question": {
-    "prompt": "How responsible is the city council for the harbor bridge closure?",
+    "prompt": "The city council is to blame for the harbor bridge closing.",
     "scale": {
       "type": "slider",
       "min": 0,
       "max": 100,
-      "left_label": "Not responsible",
-      "right_label": "Fully responsible"
+      "left_label": "Disagree",
+      "right_label": "Agree"
     }
   },
   "starting_facts": [
     {
       "id": "f1",
       "text": "The fictional Harbor Bridge closed to traffic on 2026-08-01 after an inspection report.",
-      "source_ids": ["src-inspection"],
+      "source_ids": [
+        "src-inspection"
+      ],
       "confidence": "established"
     },
     {
       "id": "f2",
       "text": "The city council controls the bridge maintenance budget.",
-      "source_ids": ["src-charter"],
+      "source_ids": [
+        "src-charter"
+      ],
       "confidence": "established"
     }
   ],
@@ -47,10 +51,19 @@
       ],
       "favors": "council-responsible",
       "impact": "high",
-      "source_ids": ["src-inspection"],
+      "source_ids": [
+        "src-inspection"
+      ],
       "confidence": "established",
-      "evidence": [{ "source_id": "src-inspection", "quote": "deck condition: poor" }],
-      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+      "evidence": [
+        {
+          "source_id": "src-inspection",
+          "quote": "deck condition: poor"
+        }
+      ],
+      "micro_poll": {
+        "statement": "The city should have fixed the bridge right after this report."
+      }
     },
     {
       "id": "s2",
@@ -63,16 +76,32 @@
           "id": "t1",
           "title": "Budget votes",
           "entries": [
-            { "date": "2024-06", "text": "First postponement vote, 5-4.", "source_ids": ["src-minutes"] },
-            { "date": "2025-06", "text": "Second postponement vote, 5-4.", "source_ids": ["src-minutes"] }
+            {
+              "date": "2024-06",
+              "text": "First postponement vote, 5-4.",
+              "source_ids": [
+                "src-minutes"
+              ]
+            },
+            {
+              "date": "2025-06",
+              "text": "Second postponement vote, 5-4.",
+              "source_ids": [
+                "src-minutes"
+              ]
+            }
           ]
         }
       ],
       "favors": "council-responsible",
       "impact": "medium",
-      "source_ids": ["src-minutes"],
+      "source_ids": [
+        "src-minutes"
+      ],
       "confidence": "established",
-      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+      "micro_poll": {
+        "statement": "The council was wrong to delay the repair money."
+      }
     },
     {
       "id": "s3",
@@ -90,9 +119,14 @@
       ],
       "favors": "council-not-responsible",
       "impact": "high",
-      "source_ids": ["src-state", "src-news"],
+      "source_ids": [
+        "src-state",
+        "src-news"
+      ],
       "confidence": "established",
-      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+      "micro_poll": {
+        "statement": "The state cut is a fair excuse for the delay."
+      }
     },
     {
       "id": "s4",
@@ -105,14 +139,20 @@
           "id": "c1",
           "title": "Why sudden cracks matter",
           "body": "If the failure was sudden, earlier repairs might not have prevented it.",
-          "source_ids": ["src-news"]
+          "source_ids": [
+            "src-news"
+          ]
         }
       ],
       "favors": "council-not-responsible",
       "impact": "medium",
-      "source_ids": ["src-news"],
+      "source_ids": [
+        "src-news"
+      ],
       "confidence": "disputed",
-      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+      "micro_poll": {
+        "statement": "A sudden new crack means no one could have seen this coming."
+      }
     }
   ],
   "sides": [
@@ -176,6 +216,77 @@
       "date": "2026-08-03",
       "type": "news",
       "accessed_at": "2026-09-30T12:00:00Z"
+    },
+    {
+      "id": "src-post",
+      "title": "Viral post about the bridge closure",
+      "publisher": "Public social media post",
+      "url": "https://example.org/fixture/bridge-post",
+      "date": "2026-03-02",
+      "type": "social",
+      "accessed_at": "2026-03-03T12:00:00Z"
+    }
+  ],
+  "takes": [
+    {
+      "id": "left",
+      "lens": "left",
+      "label": "How the left is telling it",
+      "summary": "The state starved the city of money, and now people blame the council for a crack nobody could see. This is a fictional test fixture.",
+      "seen_on": "Local Facebook groups",
+      "source_ids": [
+        "src-post"
+      ],
+      "checks": [
+        {
+          "claim": "The state cut the bridge grant.",
+          "verdict": "holds_up",
+          "note": "The state cut the grant by 40% in 2024.",
+          "source_ids": [
+            "src-state"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "center",
+      "lens": "center",
+      "label": "How the middle is telling it",
+      "summary": "Everyone had a part: the council delayed, and the state cut money. This is a fictional test fixture.",
+      "source_ids": [
+        "src-news"
+      ],
+      "checks": [
+        {
+          "claim": "The council delayed the repair money twice.",
+          "verdict": "holds_up",
+          "note": "The meeting minutes show two votes to delay.",
+          "source_ids": [
+            "src-minutes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "right",
+      "lens": "right",
+      "label": "How the right is telling it",
+      "summary": "The council wasted two years after a clear warning. This is a fictional test fixture.",
+      "seen_on": "Talk radio",
+      "source_ids": [
+        "src-post"
+      ],
+      "checks": [
+        {
+          "claim": "The council ignored the inspection.",
+          "verdict": "partly",
+          "note": "The council knew of the poor rating but voted to delay, not to ignore it.",
+          "source_ids": [
+            "src-inspection",
+            "src-minutes"
+          ]
+        }
+      ]
     }
   ]
 }

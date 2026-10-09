@@ -73,12 +73,18 @@ export const CONFIDENCE_LEVELS = ['established', 'reported', 'disputed', 'allege
 export const Confidence = z.enum(CONFIDENCE_LEVELS);
 export type Confidence = z.infer<typeof Confidence>;
 
-export const SOURCE_TYPES = ['court_record', 'official', 'primary', 'news', 'analysis'] as const;
+export const SOURCE_TYPES = ['court_record', 'official', 'primary', 'news', 'analysis', 'social'] as const;
 export const SourceType = z.enum(SOURCE_TYPES);
 export type SourceType = z.infer<typeof SourceType>;
 
 /** Source types that on their own can only support `reported` (or weaker), never `established`. */
-export const SECONDARY_SOURCE_TYPES: readonly SourceType[] = ['news', 'analysis'];
+export const SECONDARY_SOURCE_TYPES: readonly SourceType[] = ['news', 'analysis', 'social'];
+
+/**
+ * Public posts show what people are saying, never what happened: a fact,
+ * step or check cannot rest on them alone.
+ */
+export const SAYING_ONLY_SOURCE_TYPES: readonly SourceType[] = ['social'];
 
 export const IMPACT_LEVELS = ['low', 'medium', 'high'] as const;
 export const Impact = z.enum(IMPACT_LEVELS);
@@ -188,12 +194,28 @@ export const Layer = z.discriminatedUnion('kind', [
 export type Layer = z.infer<typeof Layer>;
 export type LayerKind = Layer['kind'];
 
-export const DEFAULT_MICRO_POLL_PROMPT = 'Does this change your position?';
+/**
+ * The quick reaction after each fact: the reader agrees, is not sure, or
+ * disagrees with one plain statement about it. It is separate from the main
+ * question, which is asked only before and after the facts, so one fact the
+ * reader dislikes does not count as a change of their whole position.
+ */
+export const FACT_VOTES = ['disagree', 'unsure', 'agree'] as const;
+export const FactVote = z.enum(FACT_VOTES);
+export type FactVote = z.infer<typeof FactVote>;
+
+/** Stored answer value for each fact vote (responses.value). */
+export const FACT_VOTE_VALUES: Record<FactVote, number> = { disagree: 0, unsure: 50, agree: 100 };
+
+export function factVoteFromValue(value: number): FactVote | null {
+  for (const v of FACT_VOTES) if (FACT_VOTE_VALUES[v] === value) return v;
+  return null;
+}
 
 export const MicroPoll = z
   .object({
-    prompt: Text(200),
-    re_ask_slider: z.literal(true),
+    /** One plain statement about this fact that the reader agrees or disagrees with. */
+    statement: Text(200),
   })
   .strict();
 export type MicroPoll = z.infer<typeof MicroPoll>;
@@ -202,10 +224,10 @@ export const Step = z
   .object({
     id: LocalId,
     order: z.number().int().min(1),
-    /** One-line fact for the spine. */
+    /** One-line fact for the spine, in plain words. */
     headline: Text(160),
-    /** 2-4 sentences. */
-    body: Text(1000),
+    /** 1-3 short, plain sentences. Detail goes in the depth layers. */
+    body: Text(450),
     depth: z.array(Layer).default([]),
     /** Admin-only: which side this fact favors. Never reaches the client. */
     favors: LocalId.optional(),
@@ -251,6 +273,54 @@ export const Side = z
   })
   .strict();
 export type Side = z.infer<typeof Side>;
+
+// ---------------------------------------------------------------------------
+// How the story is told online
+// ---------------------------------------------------------------------------
+
+/** The political lenses a case shows the story through. */
+export const TAKE_LENSES = ['left', 'center', 'right'] as const;
+export const TakeLens = z.enum(TAKE_LENSES);
+export type TakeLens = z.infer<typeof TakeLens>;
+
+export const CHECK_VERDICTS = ['holds_up', 'partly', 'not_backed', 'false', 'unknown'] as const;
+export const CheckVerdict = z.enum(CHECK_VERDICTS);
+export type CheckVerdict = z.infer<typeof CheckVerdict>;
+
+/** One claim a take makes, checked against the sources. */
+export const TakeCheck = z
+  .object({
+    claim: Text(300),
+    verdict: CheckVerdict,
+    /** Why, in one or two plain sentences. */
+    note: Text(400),
+    source_ids: z.array(LocalId).min(1, 'every check must cite a source'),
+    /** Admin-only supporting quotes. */
+    evidence: z.array(Evidence).optional(),
+  })
+  .strict();
+export type TakeCheck = z.infer<typeof TakeCheck>;
+
+/**
+ * A version of the story as people meet it on social media and in partisan
+ * outlets, told in its own voice, followed by what holds up and what does not.
+ */
+export const Take = z
+  .object({
+    id: LocalId,
+    lens: TakeLens,
+    /** e.g. "How the left is telling it". */
+    label: Text(80),
+    /** The take in its own voice, 2-4 plain sentences. */
+    summary: Text(600),
+    /** Where readers run into it, e.g. "TikTok, Instagram, MSNBC". */
+    seen_on: Text(160).optional(),
+    /** Sources showing that people are telling it this way. */
+    source_ids: z.array(LocalId).min(1, 'every take must cite where it is being said'),
+    checks: z.array(TakeCheck).min(1).max(6),
+  })
+  .strict();
+export type Take = z.infer<typeof Take>;
 
 // ---------------------------------------------------------------------------
 // Review record (agent reports + admin decisions). Never reaches the client.
@@ -462,6 +532,8 @@ export const Case = z
     steps: z.array(Step).min(1),
     /** Strongest case for each side, in its own words. */
     sides: z.array(Side).min(2),
+    /** How the story is being told online, by lens, with each claim checked. */
+    takes: z.array(Take).default([]),
     /** What is still unknown, shown at the end. */
     open_questions: z.array(Text(400)).default([]),
     sources: z.array(Source).min(1),

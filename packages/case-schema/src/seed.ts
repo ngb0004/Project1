@@ -1,9 +1,10 @@
 import { z } from 'zod';
-import { AFTER, BEFORE, LocalId, type StepKey } from './schema';
+import { AFTER, BEFORE, FACT_VOTES, FACT_VOTE_VALUES, LocalId, type StepKey } from './schema';
 
 /**
  * Seeded crowd data. v1 has no real crowd yet, so the admin writes a seed
- * profile per case: a Before distribution plus a per-step shift. Seeded rows are
+ * profile per case: a Before distribution, a vote mix for each fact, and a
+ * shift from Before to After. Seeded rows are
  * stored with `is_seed = true` and fade out as real completions arrive.
  */
 
@@ -19,6 +20,20 @@ export const SeedShift = z
   .strict();
 export type SeedShift = z.infer<typeof SeedShift>;
 
+/** Relative weights of the three fact votes among seeded sessions. */
+export const SeedVotes = z
+  .object({
+    agree: z.number().min(0),
+    unsure: z.number().min(0),
+    disagree: z.number().min(0),
+  })
+  .strict()
+  .refine((v) => v.agree + v.unsure + v.disagree > 0, 'at least one vote weight must be positive');
+export type SeedVotes = z.infer<typeof SeedVotes>;
+
+/** Used for steps without an entry: an even split. */
+export const EVEN_VOTES: SeedVotes = { agree: 1, unsure: 1, disagree: 1 };
+
 export const SeedProfile = z
   .object({
     /** Number of seeded sessions to generate per published version. */
@@ -28,9 +43,9 @@ export const SeedProfile = z
       .array(z.number().min(0))
       .length(10)
       .refine((b) => b.some((x) => x > 0), 'at least one bin must be positive'),
-    /** Per-step shift, keyed by step id. Steps without an entry do not move seeded sessions. */
-    steps: z.record(LocalId, SeedShift).default({}),
-    /** Change at the After question relative to the last step. */
+    /** Vote mix per fact, keyed by step id. Steps without an entry split evenly. */
+    steps: z.record(LocalId, SeedVotes).default({}),
+    /** Change at the After question relative to Before. */
     after: SeedShift.optional(),
     /** Seeds fade out linearly and are gone once this many real completions exist. */
     fade_after_real_completions: z.number().int().min(1).default(500),
@@ -88,6 +103,16 @@ function sampleBefore(bins: number[], rng: () => number): number {
   return 50;
 }
 
+function sampleVote(votes: SeedVotes, rng: () => number): number {
+  const total = votes.agree + votes.unsure + votes.disagree;
+  let r = rng() * total;
+  for (const v of FACT_VOTES) {
+    r -= votes[v];
+    if (r <= 0) return FACT_VOTE_VALUES[v];
+  }
+  return FACT_VOTE_VALUES.unsure;
+}
+
 function applyShift(value: number, shift: SeedShift | undefined, rng: () => number): number {
   if (!shift || rng() >= shift.move_share) return value;
   return clamp(value + shift.mean_shift + normal(rng) * shift.spread);
@@ -105,14 +130,13 @@ export function generateSeedSessions(
   const rng = createRng(profile.rng_seed);
   const sessions: SeedSession[] = [];
   for (let i = 0; i < profile.sessions; i++) {
-    let value = sampleBefore(profile.before_bins, rng);
-    const answers: SeedAnswer[] = [{ step_id: BEFORE, value }];
+    const before = sampleBefore(profile.before_bins, rng);
+    const answers: SeedAnswer[] = [{ step_id: BEFORE, value: before }];
     for (const id of stepIds) {
-      value = applyShift(value, Object.hasOwn(profile.steps, id) ? profile.steps[id] : undefined, rng);
-      answers.push({ step_id: id, value });
+      const votes = Object.hasOwn(profile.steps, id) ? profile.steps[id]! : EVEN_VOTES;
+      answers.push({ step_id: id, value: sampleVote(votes, rng) });
     }
-    value = applyShift(value, profile.after, rng);
-    answers.push({ step_id: AFTER, value });
+    answers.push({ step_id: AFTER, value: applyShift(before, profile.after, rng) });
     sessions.push({ index: i, answers });
   }
   return sessions;

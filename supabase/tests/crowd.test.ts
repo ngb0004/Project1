@@ -80,18 +80,22 @@ describe('answers', () => {
 describe('the crowd result stays hidden until the user commits', () => {
   it('get_reveal refuses a step the session has not answered; submit returns it after commit', async () => {
     const { case_id, version } = await publishedFixture();
-    await playDive(anon, case_id, version, STEPS, [80, 70, 70, 60, 60, 55]);
+    await playDive(anon, case_id, version, STEPS, [80, 100, 50, 0, 0, 55]);
 
     const s = await anon.rpc('start_session', { p_case_id: case_id, p_version: version, p_device_id: deviceId() });
     await anon.rpc('submit_response', { p_session_id: s.data.session_id, p_step_id: 'before', p_value: 50 });
     const peek = await anon.rpc('get_reveal', { p_session_id: s.data.session_id, p_step_id: 's1' });
     expect(peek.error?.message).toMatch(/commit an answer/);
 
-    const commit = await anon.rpc('submit_response', { p_session_id: s.data.session_id, p_step_id: 's1', p_value: 40 });
-    expect(commit.data).toMatchObject({ step_id: 's1', value: 40, previous_value: 50, locked: false });
+    // a fact vote is disagree (0), not sure (50) or agree (100)
+    const bad = await anon.rpc('submit_response', { p_session_id: s.data.session_id, p_step_id: 's1', p_value: 40 });
+    expect(bad.error?.message).toMatch(/fact vote/);
+
+    const commit = await anon.rpc('submit_response', { p_session_id: s.data.session_id, p_step_id: 's1', p_value: 0 });
+    expect(commit.data).toMatchObject({ step_id: 's1', value: 0, locked: false });
+    expect(commit.data).not.toHaveProperty('previous_value');
     expect(commit.data.crowd.n_real).toBe(2);
-    expect(commit.data.crowd.histogram).toHaveLength(10);
-    expect(commit.data.crowd.shift).toBeTruthy();
+    expect(commit.data.crowd.votes).toEqual({ agree: 0.5, unsure: 0, disagree: 0.5 });
 
     const later = await anon.rpc('get_reveal', { p_session_id: s.data.session_id, p_step_id: 's1' });
     expect(later.data.crowd.n_real).toBe(2);
@@ -107,15 +111,17 @@ describe('the crowd result stays hidden until the user commits', () => {
 });
 
 describe('final reveal', () => {
-  it('returns before/after distributions, the step that moved the crowd most, and the user path', async () => {
+  it('returns before/after distributions, the fact the crowd split on most, and the user path', async () => {
     const { case_id, version } = await publishedFixture();
-    await playDive(anon, case_id, version, STEPS, [90, 90, 90, 40, 40, 40]); // s3 moves -50
-    const { final } = await playDive(anon, case_id, version, STEPS, [95, 70, 70, 70, 70, 70]); // s1 moves -25
+    await playDive(anon, case_id, version, STEPS, [90, 100, 100, 0, 100, 40]);
+    const { final } = await playDive(anon, case_id, version, STEPS, [95, 100, 100, 100, 100, 70]); // only s3 splits
     expect(final.step_id).toBe('after');
-    expect(final.you.top_step_id).toBe('s1');
-    expect(final.you.answers.map((a: any) => a.value)).toEqual([95, 70, 70, 70, 70, 70]);
+    // After is compared with Before, not with the last fact vote
+    expect(final.previous_value).toBe(95);
+    expect(final.you.answers.map((a: any) => a.value)).toEqual([95, 100, 100, 100, 100, 70]);
     expect(final.crowd.n_real).toBe(2);
-    expect(final.crowd.top_step_id).toBe('s3');
+    expect(final.crowd.most_split_step_id).toBe('s3');
+    expect(final.crowd.steps[2].votes).toEqual({ agree: 0.5, unsure: 0, disagree: 0.5 });
     expect(final.crowd.before_histogram[9]).toBe(1);
     expect(final.crowd.mean_after).toBe(55);
     expect(final.crowd.steps.map((s: any) => s.step_id)).toEqual(STEPS);
@@ -128,7 +134,7 @@ describe('seeded crowd data', () => {
     const profile = {
       sessions: 50,
       before_bins: [0, 0, 0, 0, 0, 1, 1, 2, 3, 3],
-      steps: { s1: { move_share: 0.6, mean_shift: -12, spread: 4 } },
+      steps: { s1: { agree: 0, unsure: 1, disagree: 3 } },
       fade_after_real_completions: 2,
       rng_seed: 3,
     };
@@ -139,11 +145,12 @@ describe('seeded crowd data', () => {
 
     const crowd = await admin.rpc('admin_step_crowd', { p_case_id: case_id, p_version: version, p_step_id: 's1' });
     expect(crowd.data).toMatchObject({ n_real: 0, n_seed: 50, seed_weight: 1, seeded_share: 1 });
-    expect(crowd.data.mean_delta).toBeLessThan(0);
+    expect(crowd.data.votes.agree).toBe(0);
+    expect(crowd.data.votes.disagree).toBeGreaterThan(crowd.data.votes.unsure);
 
     const noSeed = await admin.rpc('admin_step_crowd', { p_case_id: case_id, p_version: version, p_step_id: 's1', p_include_seed: false });
     expect(noSeed.data.seed_weight).toBe(0);
-    expect(noSeed.data.histogram).toBeNull();
+    expect(noSeed.data.votes).toBeNull();
 
     await playDive(anon, case_id, version, STEPS, [50, 50, 50, 50, 50, 50]);
     const half = await admin.rpc('admin_final_crowd', { p_case_id: case_id, p_version: version });
@@ -181,7 +188,7 @@ describe('abuse floor', () => {
     await sql(`update app.settings set value = '15' where key = 'floor.words_per_second'`);
     await sql(`update app.settings set value = '1.5' where key = 'floor.min_step_seconds'`);
     try {
-      const { sessionId, final } = await playDive(anon, case_id, version, STEPS, [10, 20, 30, 40, 50, 60]);
+      const { sessionId, final } = await playDive(anon, case_id, version, STEPS, [10, 0, 50, 100, 50, 60]);
       const [s] = await sql(`select excluded, excluded_reason from public.sessions where id = $1`, [sessionId]);
       expect(s.excluded).toBe(true);
       expect(s.excluded_reason).toMatch(/reading-time floor/);

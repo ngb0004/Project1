@@ -57,7 +57,7 @@ const newStep = (id: string, sourceId: string): Case['steps'][number] => ({
   favors: 'neutral',
   source_ids: [sourceId],
   confidence: 'reported',
-  micro_poll: { prompt: 'Does this change your position?', re_ask_slider: true },
+  micro_poll: { statement: 'This new fact matters.' },
 });
 
 // ---------------------------------------------------------------------------
@@ -196,7 +196,8 @@ describe('diffCases', () => {
       ['s3', 2, 2],
       ['s4', 3, 3],
     ]);
-    expect(d.sources).toHaveLength(5);
+    expect(d.sources).toHaveLength(6);
+    expect(d.takes).toHaveLength(3);
     expect(d.startingFacts).toHaveLength(2);
     expect(d.sides).toHaveLength(2);
     expect(summarizeDiff(d, c)).toBe('No changes.');
@@ -219,9 +220,9 @@ describe('diffCases', () => {
     const b = structuredClone(a);
     b.title = 'FIXTURE: The Harbor Bridge Reopening';
     b.as_of = '2026-10-08';
-    b.question.prompt = 'How responsible is the city council for the bridge closure?';
-    b.question.scale.left_label = 'Not at all responsible';
-    b.question.scale.right_label = 'Entirely responsible';
+    b.question.prompt = 'The city council is to blame for the bridge closing.';
+    b.question.scale.left_label = 'Strongly disagree';
+    b.question.scale.right_label = 'Strongly agree';
     const d = diffCases(a, b);
     expect(d.fields.map((f) => f.path)).toEqual([
       'title',
@@ -234,8 +235,8 @@ describe('diffCases', () => {
     expect(title.label).toBe('Title');
     expect(title.before).toBe('FIXTURE: The Harbor Bridge Closure');
     expect(render(title.text!)).toBe('FIXTURE: The Harbor Bridge [-Closure-]{+Reopening+}');
-    expect(render(d.fields[2]!.text!)).toBe('How responsible is the city council for the [-harbor -]bridge closure?');
-    expect(render(d.fields[3]!.text!)).toBe('Not {+at all +}responsible');
+    expect(render(d.fields[2]!.text!)).toBe('The city council is to blame for the [-harbor -]bridge closing.');
+    expect(render(d.fields[3]!.text!)).toBe('[-Disagree-]{+Strongly disagree+}');
     expect(d.fields[4]!.label).toBe('Slider right label');
     expect(d.hasChanges).toBe(true);
     expect(d.summary).toEqual({ added: 0, removed: 0, changed: 0, moved: 0 });
@@ -414,13 +415,22 @@ describe('diffCases', () => {
     expect(s1.changes[0]!.after).toMatchObject({ kind: 'context' });
   });
 
-  it('reports a micro-poll prompt change', () => {
+  it('reports a fact-vote statement change', () => {
     const a = harbor();
     const b = structuredClone(a);
-    b.steps[1]!.micro_poll.prompt = 'Does this move you?';
+    b.steps[1]!.micro_poll.statement = 'The council made the right call.';
     const s2 = byId(diffCases(a, b).steps, 's2');
-    expect(s2.changes.map((c) => [c.path, c.label])).toEqual([['micro_poll.prompt', 'Micro-poll › Prompt']]);
-    expect(summarizeDiff(diffCases(a, b), b)).toBe('1 step changed (s2 micro-poll).');
+    expect(s2.changes.map((c) => [c.path, c.label])).toEqual([['micro_poll.statement', 'Fact vote › Statement']]);
+    expect(summarizeDiff(diffCases(a, b), b)).toBe('1 step changed (s2 fact vote).');
+  });
+
+  it('reports a changed online take', () => {
+    const a = harbor();
+    const b = structuredClone(a);
+    b.takes[2]!.checks[0]!.verdict = 'not_backed';
+    const d = diffCases(a, b);
+    expect(byId(d.takes, 'right').status).toBe('changed');
+    expect(summarizeDiff(d, b)).toBe('1 online take changed (right checks).');
   });
 
   it('reports an added step without marking later steps as changed', () => {
@@ -567,6 +577,7 @@ describe('diffCases', () => {
       ['src-minutes', 'unchanged'],
       ['src-state', 'removed'],
       ['src-news', 'unchanged'],
+      ['src-post', 'unchanged'],
       ['src-new', 'added'],
     ]);
     expect(byId(d.sources, 'src-charter').changes.map((c) => [c.path, c.label])).toEqual([['accessed_at', 'Accessed']]);
@@ -675,6 +686,7 @@ describe('summarizeDiff', () => {
       startingFacts: [],
       steps: [],
       sides: [],
+      takes: [],
       sources: [],
       summary: { added: 0, removed: 0, changed: 0, moved: 0 },
       hasChanges: false,

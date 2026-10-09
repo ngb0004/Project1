@@ -38,12 +38,11 @@ function session(answers: SessionStart['answers'] = []): SessionStart {
   };
 }
 
-function reveal(slot: string, value: number, previous = 50): Reveal {
+function reveal(slot: string, value: number): Reveal {
   if (slot === 'before') return { step_id: 'before', value, locked: false } satisfies BeforeReveal;
   return {
     step_id: slot,
     value,
-    previous_value: previous,
     locked: false,
     crowd: {
       step_id: slot,
@@ -51,13 +50,7 @@ function reveal(slot: string, value: number, previous = 50): Reveal {
       n_seed: 0,
       seed_weight: 1,
       seeded_share: 0,
-      histogram: [0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
-      previous_histogram: [0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
-      mean_value: 55,
-      mean_previous: 55,
-      mean_delta: 0,
-      moved_share: 0,
-      shift: { left_big: 0, left: 0, none: 1, right: 0, right_big: 0 },
+      votes: { agree: 0.5, unsure: 0.25, disagree: 0.25 },
     },
     version_note: { version: 1, published_at: null, parent_version: null, earlier_versions: [] },
   } satisfies StepReveal;
@@ -66,8 +59,7 @@ function reveal(slot: string, value: number, previous = 50): Reveal {
 /** Commits the current screen's slot with `value` the way the app does: start, then the server's reveal. */
 function commit(state: DiveState, value: number): DiveState {
   const slot = currentSlot(state)!;
-  const previous = pollDefault(state, slot);
-  return run(state, { type: 'set_draft', value }, { type: 'commit_start' }, { type: 'commit_success', reveal: reveal(slot, value, previous) });
+  return run(state, { type: 'set_draft', value }, { type: 'commit_start' }, { type: 'commit_success', reveal: reveal(slot, value) });
 }
 
 const started = () => run(initDive(doc, doc.id, doc.version), { type: 'session_started', session: session() });
@@ -75,19 +67,22 @@ const started = () => run(initDive(doc, doc.id, doc.version), { type: 'session_s
 const atBefore = () => run(started(), { type: 'next' }, { type: 'next' });
 
 describe('screens', () => {
-  it('builds the same fixed sequence for every case: card, facts, before, one per step, after, final, share', () => {
+  it('builds the same fixed sequence for every case: card, facts, before, one per step, takes, after, final, share', () => {
     const screens = buildScreens(doc);
     expect(screens.map((s) => s.kind)).toEqual([
       'case_card',
       'starting_facts',
       'before',
       ...stepIds.map(() => 'step'),
+      'takes',
       'after',
       'final',
       'share',
     ]);
     expect(screens.filter((s) => s.kind === 'step')).toEqual(stepIds.map((stepId, index) => ({ kind: 'step', stepId, index })));
-    expect(screens.map(slotOf)).toEqual([null, null, 'before', ...stepIds, 'after', null, null]);
+    expect(screens.map(slotOf)).toEqual([null, null, 'before', ...stepIds, null, 'after', null, null]);
+    // a case without online takes has no takes screen
+    expect(buildScreens({ ...doc, takes: [] }).some((x) => x.kind === 'takes')).toBe(false);
     expect(slotsOf(doc)).toEqual(['before', ...stepIds, 'after']);
     expect(stepById(doc, STEP2)?.headline).toBe(doc.steps[1]!.headline);
   });
@@ -103,11 +98,11 @@ describe('the crowd result stays hidden until the user commits', () => {
     s = run(s, { type: 'next' });
     expect(currentSlot(s)).toBe(STEP1);
     expect(visibleReveal(s, STEP1)).toBeNull();
-    s = run(s, { type: 'set_draft', value: 60 }, { type: 'commit_start' });
+    s = run(s, { type: 'set_draft', value: 100 }, { type: 'commit_start' });
     expect(s.pending).toBe(true);
     expect(visibleReveal(s, STEP1)).toBeNull(); // still waiting for the server
-    s = run(s, { type: 'commit_success', reveal: reveal(STEP1, 60, 80) });
-    expect(visibleReveal(s, STEP1)).toMatchObject({ step_id: STEP1, value: 60, previous_value: 80 });
+    s = run(s, { type: 'commit_success', reveal: reveal(STEP1, 100) });
+    expect(visibleReveal(s, STEP1)).toMatchObject({ step_id: STEP1, value: 100, crowd: { votes: { agree: 0.5 } } });
   });
 
   it('ignores a reveal_loaded for a slot that has not been answered', () => {
@@ -128,12 +123,12 @@ describe('the crowd result stays hidden until the user commits', () => {
       type: 'session_started',
       session: session([
         { step_id: 'before', value: 70 },
-        { step_id: STEP1, value: 65 },
+        { step_id: STEP1, value: 50 },
       ]),
     });
     expect(visibleReveal(s, STEP1)).toBeNull();
-    s = run(s, { type: 'reveal_loaded', reveal: reveal(STEP1, 65, 70) });
-    expect(visibleReveal(s, STEP1)).toMatchObject({ value: 65 });
+    s = run(s, { type: 'reveal_loaded', reveal: reveal(STEP1, 50) });
+    expect(visibleReveal(s, STEP1)).toMatchObject({ value: 50 });
   });
 });
 
@@ -159,8 +154,11 @@ describe('navigation', () => {
       s = run(s, { type: 'next' });
       expect(currentScreen(s).kind).toBe('step');
       expect(canAdvance(s)).toBe(false);
-      s = commit(s, 40);
+      s = commit(s, 50);
     }
+    s = run(s, { type: 'next' });
+    expect(currentScreen(s).kind).toBe('takes');
+    expect(canAdvance(s)).toBe(true); // nothing to answer
     s = run(s, { type: 'next' });
     expect(currentScreen(s).kind).toBe('after');
     expect(canAdvance(s)).toBe(false);
@@ -191,7 +189,7 @@ describe('navigation', () => {
   it('back navigation keeps answers locked', () => {
     let s = commit(atBefore(), 90);
     s = run(s, { type: 'next' });
-    s = commit(s, 75);
+    s = commit(s, 0);
     s = run(s, { type: 'back' });
     expect(currentSlot(s)).toBe('before');
     expect(s.draft).toBe(90); // shows the locked answer
@@ -200,8 +198,8 @@ describe('navigation', () => {
     expect(visibleReveal(s, 'before')).toMatchObject({ value: 90 });
     s = run(s, { type: 'next' });
     expect(currentSlot(s)).toBe(STEP1);
-    expect(s.draft).toBe(75);
-    expect(s.answers).toEqual({ before: 90, [STEP1]: 75 });
+    expect(s.draft).toBe(0);
+    expect(s.answers).toEqual({ before: 90, [STEP1]: 0 });
   });
 
   it('records the locked value the server returns, not the draft', () => {
@@ -221,20 +219,26 @@ describe('navigation', () => {
   });
 });
 
-describe('the slider', () => {
-  it('pollDefault pre-fills the last committed value, or 50 before anything is answered', () => {
+describe('the slider and the fact votes', () => {
+  it('Before starts at 50, each fact vote starts empty, and After starts at the Before answer', () => {
     let s = atBefore();
     expect(pollDefault(s, 'before')).toBe(DEFAULT_START_VALUE);
     expect(s.draft).toBe(DEFAULT_START_VALUE);
     s = commit(s, 90);
-    expect(pollDefault(s, STEP1)).toBe(90);
+    expect(pollDefault(s, STEP1)).toBeNull();
     s = run(s, { type: 'next' });
-    expect(s.draft).toBe(90);
-    s = commit(s, 75);
-    expect(pollDefault(s, STEP2)).toBe(75);
-    expect(pollDefault(s, 'after')).toBe(75);
-    s = run(s, { type: 'next' });
-    expect(s.draft).toBe(75);
+    expect(s.draft).toBeNull();
+    expect(run(s, { type: 'commit_start' })).toBe(s); // nothing picked yet
+    s = commit(s, 0);
+    expect(pollDefault(s, STEP2)).toBeNull();
+    // the fact vote does not move the main answer: After starts where Before ended
+    expect(pollDefault(s, 'after')).toBe(90);
+  });
+
+  it('a fact vote takes only disagree (0), not sure (50) or agree (100)', () => {
+    const s = run(commit(atBefore(), 90), { type: 'next' });
+    expect(run(s, { type: 'set_draft', value: 40 })).toBe(s);
+    for (const v of [0, 50, 100]) expect(run(s, { type: 'set_draft', value: v }).draft).toBe(v);
   });
 
   it('clamps and rounds drafts, and ignores them off poll screens', () => {
@@ -264,13 +268,13 @@ describe('resume', () => {
   it('lands on the first unanswered poll and treats earlier answers as locked', () => {
     const s = resumed([
       { step_id: 'before', value: 80 },
-      { step_id: STEP1, value: 70 },
+      { step_id: STEP1, value: 100 },
     ]);
     const cursor = resumeCursor(s);
     expect(s.screens[cursor]).toMatchObject({ kind: 'step', stepId: STEP2 });
     const there = run(s, { type: 'go_to', cursor });
     expect(there.cursor).toBe(cursor);
-    expect(there.draft).toBe(70);
+    expect(there.draft).toBeNull();
     expect(progress(there)).toBeCloseTo(2 / slotsOf(doc).length);
   });
 

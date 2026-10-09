@@ -33,11 +33,13 @@ import {
   ZERO,
   compare,
   div,
+  int,
   ratio,
   round,
   roundOrNull,
   seedWeightDec,
   seedWeightFromFloat,
+  sub,
   type Dec,
 } from './numeric';
 
@@ -93,10 +95,13 @@ function histogram(points: { value: number; isSeed: boolean }[], w: Dec): Histog
   return bins.map((b) => roundOrNull(ratio(b.value(w), t), 4) ?? 0);
 }
 
+/** Fact votes as stored: 0 disagree, 50 not sure, 100 agree. */
+const VOTE = { agree: 100, unsure: 50, disagree: 0 } as const;
+
 /**
- * Mirrors app.step_crowd(): how everyone who reached step `stepIndex` (1..n) moved there.
+ * Mirrors app.step_crowd(): how everyone who reached fact `stepIndex` (1..n) voted on it.
  * `seedWeight` is the float seedWeight() returns; it is recomputed as the database's
- * numeric so every share and mean matches app.step_crowd digit for digit.
+ * numeric so every share matches app.step_crowd digit for digit.
  */
 export function computeStepCrowd(rows: CrowdRow[], stepId: string, stepIndex: number, seedWeight: number): StepCrowd {
   return stepCrowdOf(rows, stepId, stepIndex, seedWeightFromFloat(seedWeight));
@@ -107,69 +112,34 @@ function stepCrowdOf(allRows: CrowdRow[], stepId: string, stepIndex: number, w: 
   const rows = w.v === 0n ? allRows.filter((r) => !r.is_seed) : allRows;
   const total = new WeightedSum();
   const seeded = new WeightedSum();
-  const sumValue = new WeightedSum();
-  const sumPrev = new WeightedSum();
-  const sumDelta = new WeightedSum();
-  const moved = new WeightedSum();
-  const shift = {
-    left_big: new WeightedSum(),
-    left: new WeightedSum(),
-    none: new WeightedSum(),
-    right: new WeightedSum(),
-    right_big: new WeightedSum(),
-  };
-  const values: { value: number; isSeed: boolean }[] = [];
-  const prevs: { value: number; isSeed: boolean }[] = [];
+  const votes = { agree: new WeightedSum(), unsure: new WeightedSum(), disagree: new WeightedSum() };
   let nReal = 0;
   let nSeed = 0;
 
-  // Each answer at this step, paired with the same session's previous slot.
   for (const row of rows) {
     if (row.excluded) continue;
     const value = row.values[stepIndex];
-    const prev = row.values[stepIndex - 1];
-    if (value === undefined || prev === undefined) continue;
+    if (value === undefined) continue;
     const isSeed = row.is_seed;
-    const d = value - prev;
     if (isSeed) nSeed += 1;
     else nReal += 1;
     total.add(1, isSeed);
     if (isSeed) seeded.add(1, isSeed);
-    sumValue.add(value, isSeed);
-    sumPrev.add(prev, isSeed);
-    sumDelta.add(d, isSeed);
-    if (d !== 0) moved.add(1, isSeed);
-    const bucket = d <= -15 ? 'left_big' : d < 0 ? 'left' : d === 0 ? 'none' : d < 15 ? 'right' : 'right_big';
-    shift[bucket].add(1, isSeed);
-    values.push({ value, isSeed });
-    prevs.push({ value: prev, isSeed });
+    if (value === VOTE.agree) votes.agree.add(1, isSeed);
+    else if (value === VOTE.unsure) votes.unsure.add(1, isSeed);
+    else if (value === VOTE.disagree) votes.disagree.add(1, isSeed);
   }
 
   const t = total.value(w);
   const has = t !== null && t.v > 0n;
   const share = (x: WeightedSum) => round(div(x.value(w) ?? ZERO, t!), 4);
-  const mean = (x: WeightedSum) => round(div(x.value(w)!, t!), 2);
   return {
     step_id: stepId,
     n_real: nReal,
     n_seed: nSeed,
     seed_weight: round(w, 4),
     seeded_share: has ? share(seeded) : 0,
-    histogram: has ? histogram(values, w) : null,
-    previous_histogram: has ? histogram(prevs, w) : null,
-    mean_value: has ? mean(sumValue) : null,
-    mean_previous: has ? mean(sumPrev) : null,
-    mean_delta: has ? mean(sumDelta) : null,
-    moved_share: has ? share(moved) : null,
-    shift: has
-      ? {
-          left_big: share(shift.left_big),
-          left: share(shift.left),
-          none: share(shift.none),
-          right: share(shift.right),
-          right_big: share(shift.right_big),
-        }
-      : null,
+    votes: has ? { agree: share(votes.agree), unsure: share(votes.unsure), disagree: share(votes.disagree) } : null,
   };
 }
 
@@ -177,6 +147,9 @@ function stepCrowdOf(allRows: CrowdRow[], stepId: string, stepIndex: number, w: 
 export function computeFinalCrowd(rows: CrowdRow[], stepIds: string[], seedWeight: number): FinalCrowd {
   return finalCrowdOf(rows, stepIds, seedWeightFromFloat(seedWeight));
 }
+
+const ONE = int(1);
+const absDec = (x: Dec): Dec => (compare(x, ZERO) < 0 ? sub(ZERO, x) : x);
 
 function finalCrowdOf(allRows: CrowdRow[], stepIds: string[], w: Dec): FinalCrowd {
   const rows = w.v === 0n ? allRows.filter((r) => !r.is_seed) : allRows;
@@ -199,45 +172,41 @@ function finalCrowdOf(allRows: CrowdRow[], stepIds: string[], w: Dec): FinalCrow
     done.filter((r) => r.values[index] !== undefined).map((r) => ({ value: r.values[index]!, isSeed: r.is_seed }));
 
   const steps: FinalStepStat[] = [];
-  // Unrounded mean absolute change of each listed step, for picking the top step.
-  const meanAbs: (Dec | null)[] = [];
+  // How evenly each fact split (1 = agree and disagree even), rounded as the database orders it.
+  const splits: (number | null)[] = [];
   stepIds.forEach((stepId, i) => {
     const index = i + 1;
     const weight = new WeightedSum();
-    const delta = new WeightedSum();
-    const abs = new WeightedSum();
-    const moved = new WeightedSum();
+    const agree = new WeightedSum();
+    const unsure = new WeightedSum();
+    const disagree = new WeightedSum();
     for (const r of done) {
       const value = r.values[index];
-      const prev = r.values[index - 1];
-      if (value === undefined || prev === undefined) continue;
+      if (value === undefined) continue;
       weight.add(1, r.is_seed);
-      delta.add(value - prev, r.is_seed);
-      abs.add(Math.abs(value - prev), r.is_seed);
-      if (value !== prev) moved.add(1, r.is_seed);
+      if (value === VOTE.agree) agree.add(1, r.is_seed);
+      else if (value === VOTE.unsure) unsure.add(1, r.is_seed);
+      else if (value === VOTE.disagree) disagree.add(1, r.is_seed);
     }
     const sw = weight.value(w);
     // Every step is listed; a step nobody answered has no numbers.
-    const exactAbs = sw === null ? null : ratio(abs.value(w), sw);
     if (sw === null) {
-      steps.push({ step_id: stepId, mean_delta: null, mean_abs_delta: null, moved_share: 0 });
-      meanAbs.push(null);
+      steps.push({ step_id: stepId, votes: null });
+      splits.push(null);
       return;
     }
-    steps.push({
-      step_id: stepId,
-      mean_delta: roundOrNull(ratio(delta.value(w), sw), 2),
-      mean_abs_delta: roundOrNull(exactAbs, 2),
-      moved_share: roundOrNull(ratio(moved.value(w), sw), 4) ?? 0,
-    });
-    meanAbs.push(exactAbs);
+    const a = div(agree.value(w) ?? ZERO, sw);
+    const u = div(unsure.value(w) ?? ZERO, sw);
+    const d = div(disagree.value(w) ?? ZERO, sw);
+    steps.push({ step_id: stepId, votes: { agree: round(a, 4), unsure: round(u, 4), disagree: round(d, 4) } });
+    splits.push(round(sub(ONE, absDec(sub(a, d))), 4));
   });
 
-  // Largest mean absolute change among steps that moved anyone; ties go to the earlier step.
+  // The most even split; ties go to the earlier step.
   let top = -1;
-  meanAbs.forEach((x, i) => {
-    if (x === null || compare(x, ZERO) <= 0) return;
-    if (top < 0 || compare(x, meanAbs[top]!) > 0) top = i;
+  splits.forEach((x, i) => {
+    if (x === null) return;
+    if (top < 0 || x > splits[top]!) top = i;
   });
   const hasCrowd = t !== null && t.v > 0n;
 
@@ -251,28 +220,18 @@ function finalCrowdOf(allRows: CrowdRow[], stepIds: string[], w: Dec): FinalCrow
     mean_before: roundOrNull(ratio(sumBefore.value(w), t), 2),
     mean_after: roundOrNull(ratio(sumAfter.value(w), t), 2),
     steps,
-    top_step_id: top < 0 ? null : steps[top]!.step_id,
+    most_split_step_id: top < 0 ? null : steps[top]!.step_id,
   };
 }
 
-/** Mirrors app.session_path(): the user's answers and the step that moved them most. */
+/** Mirrors app.session_path(): the user's answers in order. */
 function sessionPath(slots: SlotKey[], values: (number | undefined)[]): SessionPath {
   const answers: SessionPath['answers'] = [];
-  let topStep: string | null = null;
-  let topMove = 0;
-  let prev: number | undefined;
   for (let i = 0; i < slots.length; i++) {
-    const slot = slots[i]!;
     const value = values[i];
-    if (value === undefined) continue;
-    answers.push({ step_id: slot, value });
-    if (slot !== BEFORE && slot !== AFTER && prev !== undefined && Math.abs(value - prev) > topMove) {
-      topStep = slot;
-      topMove = Math.abs(value - prev);
-    }
-    prev = value;
+    if (value !== undefined) answers.push({ step_id: slots[i]!, value });
   }
-  return { answers, top_step_id: topStep };
+  return { answers };
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +293,7 @@ function projectDoc(doc: PublicCase, caseId: string, version: number): PublicCas
   };
   out.steps = doc.steps.map((s) => strip(s, ADMIN_ONLY_STEP_KEYS));
   out.starting_facts = doc.starting_facts.map((f) => strip(f, ['evidence']));
+  out.takes = (doc.takes ?? []).map((t) => ({ ...t, checks: t.checks.map((ch) => strip(ch, ['evidence'])) }));
   return JSON.parse(JSON.stringify(out)) as PublicCase;
 }
 
@@ -493,12 +453,12 @@ export class LocalDiveApi implements DiveApi {
     const index = v.slots.indexOf(slot);
     const value = s.values[index]!;
     if (slot === BEFORE) return { step_id: BEFORE, value, locked };
-    const previous_value = s.values[index - 1]!;
     if (slot === AFTER) {
       return {
         step_id: AFTER,
         value,
-        previous_value,
+        // The After answer is compared with Before, not with the last fact vote.
+        previous_value: s.values[0]!,
         locked,
         you: sessionPath(v.slots, s.values),
         crowd: finalCrowdOf(this.rows(v), v.stepIds, this.seedWeightFor(v, true)),
@@ -508,7 +468,6 @@ export class LocalDiveApi implements DiveApi {
     return {
       step_id: slot,
       value,
-      previous_value,
       locked,
       crowd: stepCrowdOf(this.rows(v), slot, index, this.seedWeightFor(v, true)),
       version_note: this.versionNote(v),
@@ -598,6 +557,9 @@ export class LocalDiveApi implements DiveApi {
     const answered = s.values.filter((x) => x !== undefined).length;
     if (answered !== index) {
       throw new DiveApiError('out_of_order', `answer the earlier steps first (expected slot ${answered}, got ${index})`);
+    }
+    if (slot !== BEFORE && slot !== AFTER && !Object.values(VOTE).includes(value as 0 | 50 | 100)) {
+      throw new DiveApiError('invalid', 'a fact vote must be 0 (disagree), 50 (not sure) or 100 (agree)');
     }
     s.values[index] = value;
     if (slot === AFTER) s.completedAt = this.now();

@@ -173,6 +173,9 @@ describe('public projection is an allowlist', () => {
     doc.steps[1].micro_poll.secret = 1;
     doc.sides[0].secret = 1;
     doc.sources[0].secret = 1;
+    doc.takes[0].secret = 1;
+    doc.takes[0].checks[0].secret = 1;
+    doc.takes[0].checks[0].evidence = [{ source_id: doc.takes[0].checks[0].source_ids[0], quote: 'admin only' }];
     const [{ p }] = await sql(`select public.case_public_projection($1::jsonb) as p`, [JSON.stringify(doc)]);
     expect(JSON.stringify(p)).not.toMatch(/secret|favors|impact|evidence|review/);
   });
@@ -234,7 +237,9 @@ describe('seeds', () => {
     for (const bad of [
       { sessions: 10, before_bins: [1, 1] },
       { sessions: 10, before_bins: Array(10).fill(0) },
-      { sessions: 10, before_bins: Array(10).fill(1), steps: { s1: { move_share: 'lots', mean_shift: 0, spread: 0 } } },
+      { sessions: 10, before_bins: Array(10).fill(1), steps: { s1: { agree: 'lots', unsure: 0, disagree: 0 } } },
+      // the old slider-shift shape is no longer a valid step entry
+      { sessions: 10, before_bins: Array(10).fill(1), steps: { s1: { move_share: 0.5, mean_shift: 0, spread: 0 } } },
       { sessions: 10.5, before_bins: Array(10).fill(1), fade_after_real_completions: 500, rng_seed: 1 },
     ]) {
       const res = await admin.rpc('admin_set_seed_profile', { p_case_id: case_id, p_profile: bad });
@@ -248,7 +253,7 @@ describe('seeds', () => {
     const profile = {
       sessions: 40,
       before_bins: [0, 1, 0, 2, 3, 0, 1, 4, 2, 1],
-      steps: { s1: { move_share: 0.7, mean_shift: -11.5, spread: 6 }, s3: { move_share: 0.3, mean_shift: 9, spread: 2.5 } },
+      steps: { s1: { agree: 0.7, unsure: 0.1, disagree: 0.2 }, s3: { agree: 0, unsure: 2.5, disagree: 9 } },
       after: { move_share: 0.2, mean_shift: 3, spread: 1 },
       rng_seed: -123456789,
     };
@@ -270,7 +275,7 @@ describe('seeds', () => {
 
   it('a large profile seeds quickly inside the publish', async () => {
     const { case_id, version } = await submitFixture(pipeline);
-    await adminSetSeedProfile(admin, case_id, { sessions: 5000, before_bins: Array(10).fill(1), steps: { s1: { move_share: 0.5, mean_shift: 5, spread: 5 } } });
+    await adminSetSeedProfile(admin, case_id, { sessions: 5000, before_bins: Array(10).fill(1), steps: { s1: { agree: 5, unsure: 1, disagree: 5 } } });
     const t0 = Date.now();
     await adminPublish(admin, case_id, version);
     expect(Date.now() - t0).toBeLessThan(15_000);
@@ -333,7 +338,7 @@ describe('seeds fade case-wide', () => {
     const [{ n }] = await sql(`select count(*)::int as n from public.sessions where case_id = $1 and case_version = $2 and is_seed`, [case_id, edit.version]);
     expect(n).toBe(0);
     const crowd = await admin.rpc('admin_final_crowd', { p_case_id: case_id, p_version: edit.version });
-    expect(crowd.data).toMatchObject({ n_real: 0, n_seed: 0, seed_weight: 0, before_histogram: null, top_step_id: null });
+    expect(crowd.data).toMatchObject({ n_real: 0, n_seed: 0, seed_weight: 0, before_histogram: null, most_split_step_id: null });
     expect(crowd.data.version_note.earlier_versions).toEqual([expect.objectContaining({ version, completions: 2 })]);
   });
 });

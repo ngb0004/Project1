@@ -4,7 +4,7 @@ import { generateSeedSessions, seedWeight, SeedProfile } from '../src/index';
 const profile = {
   sessions: 200,
   before_bins: [0, 0, 1, 1, 2, 3, 4, 4, 3, 2],
-  steps: { s1: { move_share: 0.5, mean_shift: -10, spread: 5 }, s2: { move_share: 0.2, mean_shift: 8, spread: 3 } },
+  steps: { s1: { agree: 3, unsure: 1, disagree: 0 }, s2: { agree: 0, unsure: 0, disagree: 1 } },
   after: { move_share: 0.1, mean_shift: -2, spread: 2 },
   fade_after_real_completions: 500,
   rng_seed: 7,
@@ -23,12 +23,22 @@ describe('seed profile', () => {
         expect(x.value).toBeGreaterThanOrEqual(0);
         expect(x.value).toBeLessThanOrEqual(100);
       }
-      // s3 has no shift entry, so nobody moves there
-      expect(s.answers[3]!.value).toBe(s.answers[2]!.value);
+      // fact votes are always disagree (0), not sure (50) or agree (100)
+      for (const x of s.answers.slice(1, 4)) expect([0, 50, 100]).toContain(x.value);
+      // s1 never draws disagree, s2 always does
+      expect(s.answers[1]!.value).not.toBe(0);
+      expect(s.answers[2]!.value).toBe(0);
     }
-    const moved = a.filter((s) => s.answers[1]!.value !== s.answers[0]!.value).length;
-    expect(moved).toBeGreaterThan(60);
-    expect(moved).toBeLessThan(140);
+    const agreeS1 = a.filter((s) => s.answers[1]!.value === 100).length;
+    expect(agreeS1).toBeGreaterThan(120);
+    expect(agreeS1).toBeLessThan(180);
+    // s3 has no entry, so it splits roughly evenly
+    const unsureS3 = a.filter((s) => s.answers[3]!.value === 50).length;
+    expect(unsureS3).toBeGreaterThan(40);
+    expect(unsureS3).toBeLessThan(95);
+    // After moves from Before, not from the fact votes
+    const moved = a.filter((s) => s.answers[4]!.value !== s.answers[0]!.value).length;
+    expect(moved).toBeLessThan(45);
     // empty bins 0-19 are never sampled
     expect(a.every((s) => s.answers[0]!.value >= 20)).toBe(true);
   });

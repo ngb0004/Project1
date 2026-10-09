@@ -31,82 +31,47 @@ async function play(api: LocalDiveApi, doc: PublicCase, values: number[], device
 // ---------------------------------------------------------------------------
 
 describe('computeStepCrowd / computeFinalCrowd', () => {
-  // slots: before, a, b, after
+  // slots: before, a, b, after. Fact votes: 0 disagree, 50 not sure, 100 agree.
   const rows: CrowdRow[] = [
-    { session_id: 'r1', is_seed: false, excluded: false, values: [80, 60, 60, 55] }, // a -20, b 0
-    { session_id: 'r2', is_seed: false, excluded: false, values: [50, 55, 70, 70] }, // a +5,  b +15
-    { session_id: 'r3', is_seed: false, excluded: false, values: [100, 100, 90] }, // unfinished: a 0, b -10
+    { session_id: 'r1', is_seed: false, excluded: false, values: [80, 100, 50, 55] },
+    { session_id: 'r2', is_seed: false, excluded: false, values: [50, 100, 0, 70] },
+    { session_id: 'r3', is_seed: false, excluded: false, values: [100, 0, 50] }, // unfinished
     { session_id: 'r4', is_seed: false, excluded: true, values: [0, 100, 100, 100] }, // excluded: counts nowhere
-    { session_id: 's1', is_seed: true, excluded: false, values: [20, 5, 5, 5] }, // a -15, b 0
-    { session_id: 's2', is_seed: true, excluded: false, values: [40, 41] }, // unfinished: a +1
+    { session_id: 's1', is_seed: true, excluded: false, values: [20, 0, 50, 5] },
+    { session_id: 's2', is_seed: true, excluded: false, values: [40, 50] }, // unfinished
   ];
 
-  it('pairs each answer with the previous slot and weighs seeds by the seed weight', () => {
-    // a: weights 1, 1, 1, 0.5, 0.5 -> total 4
+  it('splits each fact into agree / not sure / disagree and weighs seeds by the seed weight', () => {
+    // a: agree 1 + 1, disagree 1 + 0.5, not sure 0.5 -> total 4
     expect(computeStepCrowd(rows, 'a', 1, 0.5)).toEqual({
       step_id: 'a',
       n_real: 3,
       n_seed: 2,
       seed_weight: 0.5,
       seeded_share: 0.25,
-      histogram: [0.125, 0, 0, 0, 0.125, 0.25, 0.25, 0, 0, 0.25],
-      previous_histogram: [0, 0, 0.125, 0, 0.125, 0.25, 0, 0, 0.25, 0.25],
-      mean_value: 59.5,
-      mean_previous: 65,
-      mean_delta: -5.5,
-      moved_share: 0.75,
-      shift: { left_big: 0.375, left: 0, none: 0.25, right: 0.375, right_big: 0 },
+      votes: { agree: 0.5, unsure: 0.125, disagree: 0.375 },
     });
   });
 
-  it('rounds shares to 4 places and means to 2', () => {
-    // b: weights 1, 1, 1, 0.5 -> total 3.5
+  it('rounds shares to 4 places', () => {
+    // b: not sure 1 + 1 + 0.5, disagree 1 -> total 3.5
     expect(computeStepCrowd(rows, 'b', 2, 0.5)).toMatchObject({
       n_real: 3,
       n_seed: 1,
       seeded_share: 0.1429,
-      mean_value: 63.57,
-      mean_previous: 62.14,
-      mean_delta: 1.43,
-      moved_share: 0.5714,
-      shift: { left_big: 0, left: 0.2857, none: 0.4286, right: 0, right_big: 0.2857 },
-      histogram: [0.1429, 0, 0, 0, 0, 0, 0.2857, 0.2857, 0, 0.2857],
+      votes: { agree: 0, unsure: 0.7143, disagree: 0.2857 },
     });
   });
 
-  it('puts 100 in the last bin and splits shifts at 15 points', () => {
-    const edge: CrowdRow[] = [
-      [0, 15],
-      [100, 86],
-      [50, 50],
-      [10, 9],
-      [99, 100],
-    ].map((values, i) => ({ session_id: `e${i}`, is_seed: false, excluded: false, values }));
-    expect(computeStepCrowd(edge, 'x', 1, 1)).toMatchObject({
-      histogram: [0.2, 0.2, 0, 0, 0, 0.2, 0, 0, 0.2, 0.2],
-      shift: { left_big: 0, left: 0.4, none: 0.2, right: 0.2, right_big: 0.2 },
-    });
-  });
-
-  it('returns nulls, not zeros, when nobody (or only weightless seeds) reached the step', () => {
-    const empty = {
-      n_real: 0,
-      histogram: null,
-      previous_histogram: null,
-      mean_value: null,
-      mean_previous: null,
-      mean_delta: null,
-      moved_share: null,
-      shift: null,
-      seeded_share: 0,
-    };
+  it('returns nulls, not zeros, when nobody (or only weightless seeds) reached the fact', () => {
+    const empty = { n_real: 0, votes: null, seeded_share: 0 };
     expect(computeStepCrowd([], 'a', 1, 1)).toEqual({ step_id: 'a', n_seed: 0, seed_weight: 1, ...empty });
     const seedsOnly = rows.filter((r) => r.is_seed);
     // Weightless seeds (faded or left out) are not counted at all.
     expect(computeStepCrowd(seedsOnly, 'a', 1, 0)).toEqual({ step_id: 'a', n_seed: 0, seed_weight: 0, ...empty });
   });
 
-  it('final crowd: completed sessions only, before/after distributions, and the step that moved it most', () => {
+  it('final crowd: completed sessions only, before/after distributions, and the fact the crowd split on most', () => {
     // done: r1, r2, s1 (weights 1, 1, 0.5 -> total 2.5)
     expect(computeFinalCrowd(rows, ['a', 'b'], 0.5)).toEqual({
       n_real: 2,
@@ -118,16 +83,33 @@ describe('computeStepCrowd / computeFinalCrowd', () => {
       mean_before: 56,
       mean_after: 51,
       steps: [
-        { step_id: 'a', mean_delta: -9, mean_abs_delta: 13, moved_share: 1 },
-        { step_id: 'b', mean_delta: 6, mean_abs_delta: 6, moved_share: 0.4 },
+        // agree 0.8 vs disagree 0.2: split 0.4
+        { step_id: 'a', votes: { agree: 0.8, unsure: 0, disagree: 0.2 } },
+        // agree 0 vs disagree 0.4: split 0.6
+        { step_id: 'b', votes: { agree: 0, unsure: 0.6, disagree: 0.4 } },
       ],
-      top_step_id: 'a',
+      most_split_step_id: 'b',
     });
   });
 
-  it('final crowd: ties go to the earlier step; with no completions there is no crowd to show', () => {
-    const tie: CrowdRow[] = [{ session_id: 't', is_seed: false, excluded: false, values: [50, 50, 40, 40, 50, 50] }];
-    expect(computeFinalCrowd(tie, ['a', 'b', 'c', 'd'], 1).top_step_id).toBe('b');
+  it('puts 100 in the last bin of the Before and After distributions', () => {
+    const edge: CrowdRow[] = [0, 15, 50, 99, 100].map((v, i) => ({
+      session_id: `e${i}`,
+      is_seed: false,
+      excluded: false,
+      values: [v, v],
+    }));
+    expect(computeFinalCrowd(edge, [], 1)).toMatchObject({
+      before_histogram: [0.2, 0.2, 0, 0, 0, 0.2, 0, 0, 0, 0.4],
+      steps: [],
+      most_split_step_id: null,
+    });
+  });
+
+  it('final crowd: ties go to the earlier fact; with no completions there is no crowd to show', () => {
+    // a agree (split 0), b disagree (0), c and d not sure (1 each)
+    const tie: CrowdRow[] = [{ session_id: 't', is_seed: false, excluded: false, values: [50, 100, 0, 50, 50, 50] }];
+    expect(computeFinalCrowd(tie, ['a', 'b', 'c', 'd'], 1).most_split_step_id).toBe('c');
     expect(computeFinalCrowd([], ['a', 'b'], 1)).toEqual({
       n_real: 0,
       n_seed: 0,
@@ -138,10 +120,10 @@ describe('computeStepCrowd / computeFinalCrowd', () => {
       mean_before: null,
       mean_after: null,
       steps: [
-        { step_id: 'a', mean_delta: null, mean_abs_delta: null, moved_share: 0 },
-        { step_id: 'b', mean_delta: null, mean_abs_delta: null, moved_share: 0 },
+        { step_id: 'a', votes: null },
+        { step_id: 'b', votes: null },
       ],
-      top_step_id: null,
+      most_split_step_id: null,
     });
   });
 });
@@ -235,8 +217,8 @@ describe('versions', () => {
   it('keeps responses per version and notes how many people saw the earlier one', async () => {
     const api = make();
     await play(api, harbor, [50, 50, 50, 50, 50, 50]);
-    await play(api, harbor, [60, 60, 60, 60, 60, 60]);
-    const { last } = await play(api, v2doc, [70, 70, 70, 70, 70, 70]);
+    await play(api, harbor, [60, 100, 100, 100, 100, 60]);
+    const { last } = await play(api, v2doc, [70, 0, 0, 0, 0, 70]);
     if (!isFinalReveal(last)) throw new Error('expected the final reveal');
     expect(last.crowd.n_real).toBe(1);
     expect(last.version_note).toEqual({
@@ -265,12 +247,12 @@ describe('sessions', () => {
     const a = await api.startSession(harbor.id, harbor.version, dev);
     expect(a).toMatchObject({ case_id: harbor.id, case_version: harbor.version, resumed: false, completed: false, answers: [] });
     await api.submit(a.session_id, 'before', 90);
-    await api.submit(a.session_id, harbor.steps[0]!.id, 80);
+    await api.submit(a.session_id, harbor.steps[0]!.id, 100);
     const b = await api.startSession(harbor.id, harbor.version, dev);
     expect(b).toMatchObject({ session_id: a.session_id, resumed: true, completed: false });
     expect(b.answers).toEqual([
       { step_id: 'before', value: 90 },
-      { step_id: harbor.steps[0]!.id, value: 80 },
+      { step_id: harbor.steps[0]!.id, value: 100 },
     ]);
     const other = await api.startSession(harbor.id, harbor.version, deviceId());
     expect(other.session_id).not.toBe(a.session_id);
@@ -279,7 +261,7 @@ describe('sessions', () => {
   it('reports a finished session as completed', async () => {
     const api = new LocalDiveApi({ cases: [{ doc: harbor }] });
     const dev = deviceId();
-    await play(api, harbor, [1, 2, 3, 4, 5, 6], dev);
+    await play(api, harbor, [1, 100, 50, 0, 100, 6], dev);
     expect(await api.startSession(harbor.id, harbor.version, dev)).toMatchObject({ resumed: true, completed: true });
   });
 
@@ -302,9 +284,10 @@ describe('answers', () => {
     expect(await api.submit(session_id, 'before', 10)).toEqual({ step_id: 'before', value: 90, locked: true });
     // even a value that would be invalid gets the locked answer back
     expect(await api.submit(session_id, 'before', 500)).toMatchObject({ value: 90, locked: true });
-    const first = await api.submit(session_id, s1!, 70);
-    const again = await api.submit(session_id, s1!, 20);
-    expect(again).toMatchObject({ step_id: s1, value: 70, previous_value: 90, locked: true });
+    const first = await api.submit(session_id, s1!, 100);
+    const again = await api.submit(session_id, s1!, 0);
+    expect(again).toMatchObject({ step_id: s1, value: 100, locked: true });
+    expect(again).not.toHaveProperty('previous_value');
     expect(isStepReveal(first) && first.locked).toBe(false);
   });
 
@@ -323,6 +306,8 @@ describe('answers', () => {
       await rejects(api.submit(session_id, 'before', bad), 'invalid', /between 0 and 100/);
     }
     expect(await api.submit(session_id, 'before', 0)).toMatchObject({ value: 0 });
+    // a fact vote is disagree (0), not sure (50) or agree (100)
+    for (const bad of [1, 49, 99]) await rejects(api.submit(session_id, s1!, bad), 'invalid', /fact vote/);
     expect(await api.submit(session_id, s1!, 100)).toMatchObject({ value: 100 });
   });
 
@@ -337,7 +322,7 @@ describe('answers', () => {
 describe('reveals', () => {
   it('only exist for committed slots: getReveal refuses anything unanswered', async () => {
     const api = new LocalDiveApi({ cases: [{ doc: harbor }] });
-    await play(api, harbor, [80, 70, 70, 60, 60, 55]);
+    await play(api, harbor, [80, 100, 50, 0, 0, 55]);
     const { session_id } = await api.startSession(harbor.id, harbor.version, deviceId());
     const s1 = harbor.steps[0]!.id;
     await rejects(api.getReveal(session_id, 'before'), 'forbidden', /commit an answer/);
@@ -346,11 +331,12 @@ describe('reveals', () => {
     await rejects(api.getReveal(session_id, 'after'), 'forbidden');
     await rejects(api.getReveal(session_id, 'nope'), 'forbidden');
 
-    const commit = await api.submit(session_id, s1, 40);
+    const commit = await api.submit(session_id, s1, 0);
     if (!isStepReveal(commit)) throw new Error('expected a step reveal');
-    expect(commit).toMatchObject({ step_id: s1, value: 40, previous_value: 50, locked: false });
+    expect(commit).toMatchObject({ step_id: s1, value: 0, locked: false });
     expect(commit.crowd).toMatchObject({ step_id: s1, n_real: 2, n_seed: 0, seeded_share: 0 });
-    expect(commit.crowd.histogram).toHaveLength(10);
+    // the other reader agreed; this one disagreed
+    expect(commit.crowd.votes).toEqual({ agree: 0.5, unsure: 0, disagree: 0.5 });
     expect(commit.version_note).toMatchObject({ version: harbor.version, earlier_versions: [] });
     expect(await api.getReveal(session_id, s1)).toEqual({ ...commit, locked: true });
   });
@@ -361,24 +347,17 @@ describe('reveals', () => {
     expect(await api.submit(session_id, 'before', 50)).toEqual({ step_id: 'before', value: 50, locked: false });
   });
 
-  it('the final reveal has the user path, the step that moved them most, and the crowd', async () => {
+  it('the final reveal compares After with Before and has the user path and the crowd', async () => {
     const api = new LocalDiveApi({ cases: [{ doc: harbor }] });
-    const [a, , c] = harbor.steps.map((s) => s.id);
-    await play(api, harbor, [90, 90, 90, 40, 40, 40]); // c moves the crowd -50
-    const { last } = await play(api, harbor, [95, 70, 70, 70, 70, 70]); // a moves this user -25
+    const [, , c] = harbor.steps.map((s) => s.id);
+    await play(api, harbor, [90, 100, 100, 0, 100, 40]);
+    const { last } = await play(api, harbor, [95, 100, 100, 100, 100, 70]); // only c splits the crowd
     if (!isFinalReveal(last)) throw new Error('expected the final reveal');
-    expect(last).toMatchObject({ step_id: 'after', value: 70, previous_value: 70, locked: false });
-    expect(last.you.top_step_id).toBe(a);
-    expect(last.you.answers.map((x) => x.value)).toEqual([95, 70, 70, 70, 70, 70]);
-    expect(last.crowd).toMatchObject({ n_real: 2, n_seed: 0, top_step_id: c, mean_after: 55 });
+    expect(last).toMatchObject({ step_id: 'after', value: 70, previous_value: 95, locked: false });
+    expect(last.you.answers.map((x) => x.value)).toEqual([95, 100, 100, 100, 100, 70]);
+    expect(last.crowd).toMatchObject({ n_real: 2, n_seed: 0, most_split_step_id: c, mean_after: 55 });
     expect(last.crowd.before_histogram![9]).toBe(1);
     expect(last.crowd.steps.map((s) => s.step_id)).toEqual(harbor.steps.map((s) => s.id));
-  });
-
-  it('a user who never moved has no top step', async () => {
-    const api = new LocalDiveApi({ cases: [{ doc: harbor }] });
-    const { last } = await play(api, harbor, [60, 60, 60, 60, 60, 60]);
-    expect(isFinalReveal(last) && last.you.top_step_id).toBeNull();
   });
 });
 
@@ -386,7 +365,7 @@ describe('seeded crowd data', () => {
   const profile = (fade: number): SeedProfileInput => ({
     sessions: 40,
     before_bins: [0, 0, 1, 1, 2, 3, 3, 2, 1, 1],
-    steps: { [orchard.steps[0]!.id]: { move_share: 0.6, mean_shift: -12, spread: 4 } },
+    steps: { [orchard.steps[0]!.id]: { agree: 0, unsure: 1, disagree: 3 } },
     after: { move_share: 0.2, mean_shift: 5, spread: 2 },
     fade_after_real_completions: fade,
     rng_seed: 3,
@@ -396,8 +375,10 @@ describe('seeded crowd data', () => {
     const api = new LocalDiveApi({ cases: [{ doc: orchard, seedProfile: profile(2) }] });
     const first = orchard.steps[0]!.id;
     expect(api.stepCrowd(orchard.id, orchard.version, first)).toMatchObject({ n_real: 0, n_seed: 40, seed_weight: 1, seeded_share: 1 });
-    expect(api.stepCrowd(orchard.id, orchard.version, first).mean_delta).toBeLessThan(0);
-    expect(api.stepCrowd(orchard.id, orchard.version, first, false)).toMatchObject({ seed_weight: 0, histogram: null });
+    const votes = api.stepCrowd(orchard.id, orchard.version, first).votes!;
+    expect(votes.agree).toBe(0);
+    expect(votes.disagree).toBeGreaterThan(votes.unsure);
+    expect(api.stepCrowd(orchard.id, orchard.version, first, false)).toMatchObject({ seed_weight: 0, votes: null });
 
     const values = slotsOf(orchard).map(() => 50);
     const one = await play(api, orchard, values);
@@ -467,7 +448,7 @@ describe('user signals', () => {
     const { session_id } = await api.startSession(orchard.id, orchard.version, deviceId());
     await rejects(api.rateFairness(session_id, side, 'unfair'), 'out_of_order', /finish the dive/);
 
-    const done = await play(api, orchard, slotsOf(orchard).map(() => 40));
+    const done = await play(api, orchard, slotsOf(orchard).map(() => 50));
     await rejects(api.rateFairness(done.sessionId, 'nope', 'fair'), 'not_found', /unknown side/);
     await rejects(api.rateFairness(done.sessionId, side, 'meh' as never), 'invalid', /unknown rating/);
     await api.rateFairness(done.sessionId, side, 'unfair');
@@ -479,12 +460,12 @@ describe('user signals', () => {
 });
 
 describe('crowd semantics after the phase 1 review', () => {
-  it('names no top step when nobody moved', () => {
-    const still: CrowdRow[] = [
-      { session_id: 'x', is_seed: false, excluded: false, values: [40, 40, 40, 40] },
-      { session_id: 'y', is_seed: false, excluded: false, values: [60, 60, 60, 60] },
+  it('names the most split fact even when everyone agrees on every fact (no tie-breaking surprises)', () => {
+    const same: CrowdRow[] = [
+      { session_id: 'x', is_seed: false, excluded: false, values: [40, 100, 100, 40] },
+      { session_id: 'y', is_seed: false, excluded: false, values: [60, 100, 100, 60] },
     ];
-    expect(computeFinalCrowd(still, ['a', 'b'], 1).top_step_id).toBeNull();
+    expect(computeFinalCrowd(same, ['a', 'b'], 1).most_split_step_id).toBe('a');
   });
 
   it('fades seeds by real completions across every version of the case', async () => {

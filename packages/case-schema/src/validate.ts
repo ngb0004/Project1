@@ -3,11 +3,13 @@ import {
   CONFIDENCE_LEVELS,
   Case,
   NEUTRAL,
+  SAYING_ONLY_SOURCE_TYPES,
   SECONDARY_SOURCE_TYPES,
+  TAKE_LENSES,
   type Confidence,
   type Source,
 } from './schema';
-import { countSentences, findJudgingWords } from './style';
+import { MAX_READING_GRADE, countSentences, findJudgingWords, readingGrade } from './style';
 
 export type IssueCode =
   | 'schema'
@@ -23,6 +25,7 @@ export type IssueCode =
   | 'evidence_not_cited'
   | 'parent_version'
   | 'empty_case'
+  | 'social_only'
   // warnings
   | 'judging_word'
   | 'body_length'
@@ -31,7 +34,9 @@ export type IssueCode =
   | 'missing_impact'
   | 'no_open_questions'
   | 'as_of_future'
-  | 'review_mismatch';
+  | 'review_mismatch'
+  | 'reading_level'
+  | 'missing_takes';
 
 export interface Issue {
   /** Dotted path into the case document, e.g. `steps.2.source_ids`. */
@@ -151,6 +156,22 @@ export function checkCaseRules(c: Case, opts: ValidateOptions = {}): { errors: I
     if (!text) return;
     for (const w of findJudgingWords(text)) warn(path, 'judging_word', `Judging word "${w}" in user-facing copy.`);
   };
+  /** The main reading path must be plain enough for most readers; depth layers may go further. */
+  const plain = (path: string, text: string | undefined) => {
+    lint(path, text);
+    if (!text) return;
+    const grade = readingGrade(text);
+    if (grade > MAX_READING_GRADE) {
+      warn(path, 'reading_level', `Reads at about grade ${grade}; aim for grade ${MAX_READING_GRADE} or lower (shorter sentences, everyday words).`);
+    }
+  };
+  /** A fact or claim cannot rest on public posts alone: they show what is said, not what happened. */
+  const checkNotSocialOnly = (path: string, ids: string[]) => {
+    const cited = ids.map((id) => sourcesById.get(id)).filter((s): s is Source => !!s);
+    if (cited.length > 0 && cited.every((s) => SAYING_ONLY_SOURCE_TYPES.includes(s.type))) {
+      err(path, 'social_only', 'Only social posts are cited. They show what people are saying, not what happened; cite reporting or records too.');
+    }
+  };
   lint('title', c.title);
   lint('content_warning', c.content_warning);
   lint('question.scale.left_label', c.question.scale.left_label);
@@ -175,7 +196,8 @@ export function checkCaseRules(c: Case, opts: ValidateOptions = {}): { errors: I
     checkCites(`${p}.source_ids`, f.source_ids);
     checkConfidence(p, f.source_ids, f.confidence);
     checkEvidence(p, f.source_ids, f.evidence);
-    lint(`${p}.text`, f.text);
+    checkNotSocialOnly(`${p}.source_ids`, f.source_ids);
+    plain(`${p}.text`, f.text);
   });
 
   // Steps
@@ -192,6 +214,7 @@ export function checkCaseRules(c: Case, opts: ValidateOptions = {}): { errors: I
     checkCites(`${p}.source_ids`, s.source_ids);
     checkConfidence(p, s.source_ids, s.confidence);
     checkEvidence(p, s.source_ids, s.evidence);
+    checkNotSocialOnly(`${p}.source_ids`, s.source_ids);
 
     if (s.favors === undefined) {
       warn(`${p}.favors`, 'missing_favors', 'No "favors" tag, so this step is left out of the balance check.');
@@ -201,10 +224,10 @@ export function checkCaseRules(c: Case, opts: ValidateOptions = {}): { errors: I
     if (s.impact === undefined) warn(`${p}.impact`, 'missing_impact', 'No "impact" tag; the balance panel treats it as medium.');
 
     const n = countSentences(s.body);
-    if (n < 2 || n > 4) warn(`${p}.body`, 'body_length', `Body has about ${n} sentence(s); house style is 2-4.`);
-    lint(`${p}.headline`, s.headline);
-    lint(`${p}.body`, s.body);
-    lint(`${p}.micro_poll.prompt`, s.micro_poll.prompt);
+    if (n > 3) warn(`${p}.body`, 'body_length', `Body has about ${n} sentences; house style is 1-3 short ones, with detail in the depth layers.`);
+    plain(`${p}.headline`, s.headline);
+    plain(`${p}.body`, s.body);
+    plain(`${p}.micro_poll.statement`, s.micro_poll.statement);
 
     s.depth.forEach((layer, j) => {
       const lp = `${p}.depth.${j}`;
@@ -238,7 +261,35 @@ export function checkCaseRules(c: Case, opts: ValidateOptions = {}): { errors: I
     });
   });
 
-  lint('question.prompt', c.question.prompt);
+  plain('question.prompt', c.question.prompt);
+
+  // How the story is told online
+  if (c.takes.length === 0) {
+    warn('takes', 'missing_takes', 'No online takes. Show how the left, the center and the right are telling the story.');
+  } else {
+    const lenses = new Set(c.takes.map((t) => t.lens));
+    for (const lens of TAKE_LENSES) {
+      if (!lenses.has(lens)) warn('takes', 'missing_takes', `No "${lens}" take.`);
+    }
+  }
+  const takeIds = new Set<string>();
+  c.takes.forEach((t, i) => {
+    const tp = `takes.${i}`;
+    if (takeIds.has(t.id)) err(`${tp}.id`, 'duplicate_id', `Duplicate take id "${t.id}".`);
+    takeIds.add(t.id);
+    checkCites(`${tp}.source_ids`, t.source_ids);
+    // The summary is the take's own voice, so it is not style-linted; only its plainness is checked.
+    const grade = readingGrade(t.summary);
+    if (grade > MAX_READING_GRADE) warn(`${tp}.summary`, 'reading_level', `Reads at about grade ${grade}; aim for grade ${MAX_READING_GRADE} or lower.`);
+    lint(`${tp}.label`, t.label);
+    t.checks.forEach((ch, j) => {
+      const cp = `${tp}.checks.${j}`;
+      checkCites(`${cp}.source_ids`, ch.source_ids);
+      checkEvidence(cp, ch.source_ids, ch.evidence);
+      if (ch.verdict !== 'unknown') checkNotSocialOnly(`${cp}.source_ids`, ch.source_ids);
+      plain(`${cp}.note`, ch.note);
+    });
+  });
   if (c.open_questions.length === 0) warn('open_questions', 'no_open_questions', 'No open questions listed for the end of the dive.');
 
   // Versions
@@ -279,7 +330,9 @@ export function checkCaseRules(c: Case, opts: ValidateOptions = {}): { errors: I
       ? c.steps.some((s) => s.depth.some((l) => `layer:${s.id}/${l.id}` === row.target))
       : row.target.startsWith('side:')
         ? sideIds.has(row.target.slice(5))
-        : confidenceOf(row.target) !== undefined;
+        : row.target.startsWith('take:')
+          ? takeIds.has(row.target.slice(5).split('/')[0]!)
+          : confidenceOf(row.target) !== undefined;
     if (!known) warn(`${rp}.target`, 'unknown_reference', `Fact-check row refers to unknown target "${row.target}".`);
     if (row.round !== latestRound) return;
     if (row.verdict === 'unsupported' || row.verdict === 'uncited' || row.verdict === 'source_unavailable') {

@@ -1,7 +1,6 @@
 import {
   CONFIDENCE_LEVELS,
   Confidence as ConfidenceSchema,
-  DEFAULT_MICRO_POLL_PROMPT,
   type Case,
   type CaseInput,
   type Confidence,
@@ -27,7 +26,6 @@ export interface NormalizeChange {
  * Mechanical fixes the editor applies before validation:
  * - steps sorted by `order` and renumbered 1..n
  * - `established` downgraded to `reported` where only news/analysis sources are cited
- * - missing micro-poll filled with the default prompt
  *
  * Returns a new object; the input is not mutated.
  */
@@ -53,10 +51,6 @@ export function normalizeCase<T extends Case | CaseInput>(input: T): { case: T; 
       if (sortable && s.order !== i + 1) {
         changes.push({ path: `steps.${i}.order`, change: `renumbered ${s.order} -> ${i + 1}` });
         s.order = i + 1;
-      }
-      if (!s.micro_poll) {
-        s.micro_poll = { prompt: DEFAULT_MICRO_POLL_PROMPT, re_ask_slider: true };
-        changes.push({ path: `steps.${i}.micro_poll`, change: 'added default micro-poll' });
       }
       // Never invent a label: a missing or invalid confidence is left for the validator to report.
       if (!isConfidence(s.confidence)) return;

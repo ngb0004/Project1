@@ -193,8 +193,9 @@ export interface CaseDiff {
   startingFacts: ItemDiff[];
   steps: ItemDiff[];
   sides: ItemDiff[];
+  takes: ItemDiff[];
   sources: ItemDiff[];
-  /** Counted over starting facts + steps + sides + sources. A moved item that also changed counts in both. */
+  /** Counted over starting facts + steps + sides + takes + sources. A moved item that also changed counts in both. */
   summary: { added: number; removed: number; changed: number; moved: number };
   hasChanges: boolean;
 }
@@ -270,9 +271,15 @@ const KEY_LABELS: Record<string, string> = {
   source_id: 'Source',
   confidence: 'Confidence',
   evidence: 'Evidence',
-  micro_poll: 'Micro-poll',
+  micro_poll: 'Fact vote',
+  statement: 'Statement',
   prompt: 'Prompt',
-  re_ask_slider: 'Re-ask slider',
+  lens: 'Lens',
+  seen_on: 'Seen on',
+  checks: 'Checks',
+  claim: 'Claim',
+  verdict: 'Verdict',
+  note: 'Note',
   text: 'Text',
   label: 'Label',
   steelman: 'Steelman',
@@ -364,13 +371,14 @@ function diffValue(path: string, label: string, before: unknown, after: unknown,
 // Item lists
 // ---------------------------------------------------------------------------
 
-type ItemKind = 'startingFacts' | 'steps' | 'sides' | 'sources';
+type ItemKind = 'startingFacts' | 'steps' | 'sides' | 'takes' | 'sources';
 
 /** Preferred field order per item kind; any other keys follow in document order. */
 const FIELD_ORDER: Record<ItemKind, readonly string[]> = {
   startingFacts: ['text', 'confidence', 'source_ids', 'evidence'],
   steps: ['headline', 'body', 'confidence', 'favors', 'impact', 'source_ids', 'evidence', 'depth', 'micro_poll'],
   sides: ['label', 'steelman'],
+  takes: ['lens', 'label', 'summary', 'seen_on', 'source_ids', 'checks'],
   sources: ['title', 'publisher', 'url', 'date', 'type', 'accessed_at', 'quote_excerpt'],
 };
 
@@ -382,6 +390,8 @@ const ADMIN_ONLY_ITEM_KEYS: Record<ItemKind, readonly string[]> = {
   startingFacts: ['evidence'],
   steps: ADMIN_ONLY_STEP_KEYS,
   sides: [],
+  // Evidence sits inside each check; it is compared as part of `checks`.
+  takes: [],
   sources: [],
 };
 
@@ -483,10 +493,11 @@ export function diffCases(before: CaseLike, after: CaseLike): CaseDiff {
   const startingFacts = diffItems('startingFacts', asObjs(before.starting_facts), asObjs(after.starting_facts), compareAdmin);
   const steps = diffItems('steps', asObjs(before.steps), asObjs(after.steps), compareAdmin);
   const sides = diffItems('sides', asObjs(before.sides), asObjs(after.sides), compareAdmin);
+  const takes = diffItems('takes', asObjs(before.takes), asObjs(after.takes), compareAdmin);
   const sources = diffItems('sources', asObjs(before.sources), asObjs(after.sources), compareAdmin);
 
   const summary = { added: 0, removed: 0, changed: 0, moved: 0 };
-  for (const d of [...startingFacts, ...steps, ...sides, ...sources]) {
+  for (const d of [...startingFacts, ...steps, ...sides, ...takes, ...sources]) {
     if (d.status === 'added') summary.added++;
     else if (d.status === 'removed') summary.removed++;
     else if (d.status === 'changed') summary.changed++;
@@ -494,7 +505,7 @@ export function diffCases(before: CaseLike, after: CaseLike): CaseDiff {
   }
 
   const hasChanges = fields.length > 0 || summary.added + summary.removed + summary.changed + summary.moved > 0;
-  return { fields, startingFacts, steps, sides, sources, summary, hasChanges };
+  return { fields, startingFacts, steps, sides, takes, sources, summary, hasChanges };
 }
 
 // ---------------------------------------------------------------------------
@@ -505,13 +516,14 @@ const NOUNS: Record<ItemKind, [string, string]> = {
   startingFacts: ['starting fact', 'starting facts'],
   steps: ['step', 'steps'],
   sides: ['side', 'sides'],
+  takes: ['online take', 'online takes'],
   sources: ['source', 'sources'],
 };
 
 /** Short field names for the summary, keyed by the first segment of a change path. */
 const SHORT_NAMES: Record<string, string> = {
   source_ids: 'sources',
-  micro_poll: 'micro-poll',
+  micro_poll: 'fact vote',
   accessed_at: 'accessed date',
   quote_excerpt: 'quote excerpt',
   url: 'URL',
@@ -617,6 +629,7 @@ export function summarizeDiff(d: CaseDiff, after: CaseLike): string {
     ...itemClauses('startingFacts', d.startingFacts, after),
     ...itemClauses('steps', d.steps, after),
     ...itemClauses('sides', d.sides, after),
+    ...itemClauses('takes', d.takes, after),
     ...itemClauses('sources', d.sources, after),
   ];
   if (clauses.length) sentences.push(clauses.join(', '));

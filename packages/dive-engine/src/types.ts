@@ -2,7 +2,8 @@ import type { FactFlag, FairnessRating, PublicCase } from '@sia/case-schema';
 
 /**
  * Wire types for the dive API. They mirror the JSON returned by the database
- * functions in supabase/migrations/20261008000002_crowd.sql exactly; the local
+ * functions in supabase/migrations (crowd functions, last redefined in
+ * 20261009000011_fact_votes_and_takes.sql) exactly; the local
  * (in-memory) API returns the same shapes.
  */
 
@@ -11,20 +12,14 @@ export type SlotKey = string; // 'before' | 'after' | step id
 /** Share of the crowd in each 10-point bin (0-9, 10-19, ..., 90-100). Sums to 1. */
 export type Histogram = number[];
 
-export interface ShiftBuckets {
-  /** moved 15+ points toward the left label */
-  left_big: number;
-  /** moved 1-14 points toward the left label */
-  left: number;
-  /** did not move */
-  none: number;
-  /** moved 1-14 points toward the right label */
-  right: number;
-  /** moved 15+ points toward the right label */
-  right_big: number;
+/** Shares (0..1) of the weighted crowd that voted each way on a fact. Sum to 1. */
+export interface VoteSplit {
+  agree: number;
+  unsure: number;
+  disagree: number;
 }
 
-/** How everyone who reached a step moved there. Shares are 0..1. */
+/** How everyone who reached a fact voted on it. */
 export interface StepCrowd {
   step_id: string;
   n_real: number;
@@ -33,20 +28,14 @@ export interface StepCrowd {
   seed_weight: number;
   /** Share of the weighted crowd that is seeded. > 0 means the UI must say so. */
   seeded_share: number;
-  histogram: Histogram | null;
-  previous_histogram: Histogram | null;
-  mean_value: number | null;
-  mean_previous: number | null;
-  mean_delta: number | null;
-  moved_share: number | null;
-  shift: ShiftBuckets | null;
+  /** Null when nobody counts yet. */
+  votes: VoteSplit | null;
 }
 
 export interface FinalStepStat {
   step_id: string;
-  mean_delta: number | null;
-  mean_abs_delta: number | null;
-  moved_share: number;
+  /** Vote split among people who finished; null when nobody counts. */
+  votes: VoteSplit | null;
 }
 
 export interface FinalCrowd {
@@ -59,8 +48,8 @@ export interface FinalCrowd {
   mean_before: number | null;
   mean_after: number | null;
   steps: FinalStepStat[];
-  /** The step that moved the crowd most (largest mean absolute change). */
-  top_step_id: string | null;
+  /** The fact where agree and disagree were closest to even (earlier fact on a tie). */
+  most_split_step_id: string | null;
 }
 
 export interface VersionNote {
@@ -72,9 +61,8 @@ export interface VersionNote {
 }
 
 export interface SessionPath {
+  /** Before (0-100), each fact vote (0, 50 or 100) and After (0-100), in order. */
   answers: { step_id: SlotKey; value: number }[];
-  /** The step that moved this user most, or null if nothing moved them. */
-  top_step_id: string | null;
 }
 
 export interface BeforeReveal {
@@ -85,8 +73,8 @@ export interface BeforeReveal {
 
 export interface StepReveal {
   step_id: string;
+  /** The fact vote: 0 disagree, 50 not sure, 100 agree. */
   value: number;
-  previous_value: number;
   locked: boolean;
   crowd: StepCrowd;
   version_note: VersionNote;
@@ -95,6 +83,7 @@ export interface StepReveal {
 export interface FinalReveal {
   step_id: 'after';
   value: number;
+  /** The Before answer. */
   previous_value: number;
   locked: boolean;
   you: SessionPath;

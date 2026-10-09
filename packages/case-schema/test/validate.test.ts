@@ -10,6 +10,41 @@ describe('validateCase', () => {
     expect(r.case?.review.decisions).toEqual([]);
   });
 
+  it('rejects a step that rests only on social posts', () => {
+    const c = loadFixture('fixture-harbor-bridge');
+    c.steps[0].source_ids = ['src-post'];
+    c.steps[0].evidence = [];
+    c.steps[0].confidence = 'reported';
+    const r = validateCase(c);
+    expect(r.errors).toContainEqual(expect.objectContaining({ code: 'social_only', path: 'steps.0.source_ids' }));
+  });
+
+  it('lets a take cite social posts as evidence of what is being said, but not a check verdict', () => {
+    const c = loadFixture('fixture-harbor-bridge');
+    expect(validateCase(c).ok).toBe(true);
+    c.takes[0].checks[0].source_ids = ['src-post'];
+    const r = validateCase(c);
+    expect(r.errors).toContainEqual(expect.objectContaining({ code: 'social_only', path: 'takes.0.checks.0.source_ids' }));
+    c.takes[0].checks[0].verdict = 'unknown';
+    expect(validateCase(c).ok).toBe(true);
+  });
+
+  it('warns when a lens is missing from the online takes', () => {
+    const c = loadFixture('fixture-harbor-bridge');
+    c.takes = c.takes.filter((t: { lens: string }) => t.lens !== 'right');
+    const r = validateCase(c);
+    expect(r.ok).toBe(true);
+    expect(r.warnings).toContainEqual(expect.objectContaining({ code: 'missing_takes', message: 'No "right" take.' }));
+  });
+
+  it('warns when the main reading path is hard to read', () => {
+    const c = loadFixture('fixture-harbor-bridge');
+    c.steps[0].body =
+      'Notwithstanding municipal infrastructure appropriations, the administration consistently deprioritized comprehensive rehabilitation, characterizing deterioration as manageable.';
+    const r = validateCase(c);
+    expect(r.warnings).toContainEqual(expect.objectContaining({ code: 'reading_level', path: 'steps.0.body' }));
+  });
+
   it('rejects a step with no sources (uncited step)', () => {
     const c = loadFixture('fixture-harbor-bridge');
     c.steps[1].source_ids = [];

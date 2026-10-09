@@ -30,7 +30,7 @@ describe('edit then approve', () => {
     await adminPublish(admin, case_id, v1);
     const original = (await getStaffVersion(admin, case_id, v1))!;
 
-    const { sessionId } = await playDive(anon, case_id, v1, STEPS, [90, 85, 80, 75, 70, 75]);
+    const { sessionId } = await playDive(anon, case_id, v1, STEPS, [90, 100, 50, 0, 50, 75]);
 
     // Inline edits save a draft tagged admin_edit; repeated saves update the same draft.
     const edited = { ...original.doc, title: 'The Harbor Bridge Closure (corrected)' };

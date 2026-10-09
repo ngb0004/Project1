@@ -78,3 +78,29 @@ export function countSentences(text: string): number {
     .filter(Boolean);
   return Math.max(1, parts.length);
 }
+
+/** The highest school grade level the dive's own words should need. */
+export const MAX_READING_GRADE = 8;
+
+/** Rough syllable count for one English word. */
+export function countSyllables(word: string): number {
+  const w = word.toLowerCase().replace(/[^a-z]/g, '');
+  if (!w) return 0;
+  if (w.length <= 3) return 1;
+  const trimmed = w.replace(/(?:[^laeiouy]es|[^laeiouy]ed|[^laeiouy]e)$/, '').replace(/^y/, '');
+  const groups = trimmed.match(/[aeiouy]{1,2}/g);
+  return Math.max(1, groups ? groups.length : 1);
+}
+
+/**
+ * Flesch-Kincaid grade level of the dive's own words (quoted speech is
+ * ignored). Numbers and dates count as one-syllable words. Returns 0 for empty text.
+ */
+export function readingGrade(text: string): number {
+  const own = stripQuotedSpans(text);
+  const words = own.match(/[A-Za-z][A-Za-z'’-]*|\d[\d,.:/-]*/g) ?? [];
+  if (words.length === 0) return 0;
+  const syllables = words.reduce((n, w) => n + (/^\d/.test(w) ? 1 : countSyllables(w)), 0);
+  const sentences = countSentences(own);
+  return Math.round((0.39 * (words.length / sentences) + 11.8 * (syllables / words.length) - 15.59) * 10) / 10;
+}

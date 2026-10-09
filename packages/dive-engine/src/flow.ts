@@ -5,7 +5,12 @@ import type { Reveal, SessionStart, SlotKey } from './types';
  * The dive is a fixed sequence of screens generated from the case record.
  * The flow is identical for every case and every user:
  *
- *   case card -> starting facts -> before -> step 1..n -> after -> final reveal -> share
+ *   case card -> starting facts -> before -> fact 1..n -> online takes -> after -> final reveal -> share
+ *
+ * Before and After ask the main question on a slider. Each fact asks for a
+ * quick vote (agree, not sure, disagree) on one statement about it; the vote
+ * is separate from the main position. The online-takes screen appears only
+ * when the case has takes.
  *
  * This module is a pure state machine (a reducer plus selectors). It holds no
  * case-specific logic and never shows a crowd result for a slot that has not
@@ -17,18 +22,20 @@ export type Screen =
   | { kind: 'starting_facts' }
   | { kind: 'before' }
   | { kind: 'step'; stepId: string; index: number }
+  | { kind: 'takes' }
   | { kind: 'after' }
   | { kind: 'final' }
   | { kind: 'share' };
 
 export type ScreenKind = Screen['kind'];
 
-export function buildScreens(doc: Pick<PublicCase, 'steps'>): Screen[] {
+export function buildScreens(doc: Pick<PublicCase, 'steps'> & { takes?: PublicCase['takes'] }): Screen[] {
   return [
     { kind: 'case_card' },
     { kind: 'starting_facts' },
     { kind: 'before' },
     ...doc.steps.map((s, index): Screen => ({ kind: 'step', stepId: s.id, index })),
+    ...((doc.takes ?? []).length > 0 ? [{ kind: 'takes' } as Screen] : []),
     { kind: 'after' },
     { kind: 'final' },
     { kind: 'share' },
@@ -67,7 +74,7 @@ export interface DiveState {
   answers: Record<SlotKey, number>;
   /** Reveals by slot. Only ever set for committed slots. */
   reveals: Record<SlotKey, Reveal>;
-  /** Current uncommitted slider value for the screen's slot. */
+  /** Current uncommitted answer for the screen's slot: a slider value, or a fact vote (0, 50, 100) once picked. */
   draft: number | null;
   /** Depth layers the user expanded, by step id. */
   expanded: Record<string, boolean>;
@@ -107,15 +114,18 @@ export function initDive(doc: PublicCase, caseId: string, version: number): Dive
 
 const clampValue = (v: number) => Math.max(0, Math.min(100, Math.round(v)));
 
-/** The slider's starting value on a poll screen: the user's last committed value (pre-filled), or 50. */
-export function pollDefault(state: Pick<DiveState, 'doc' | 'answers'>, slot: SlotKey): number {
-  const slots = slotsOf(state.doc);
-  const i = slots.indexOf(slot);
-  for (let j = i - 1; j >= 0; j--) {
-    const v = state.answers[slots[j]!];
-    if (v !== undefined) return v;
-  }
-  return DEFAULT_START_VALUE;
+/** Fact votes as stored: 0 disagree, 50 not sure, 100 agree. */
+export const FACT_VOTE_OPTIONS = [0, 50, 100] as const;
+const isFactVote = (v: number) => (FACT_VOTE_OPTIONS as readonly number[]).includes(v);
+
+/**
+ * The starting answer on a poll screen. Before starts at 50; After starts at
+ * the user's Before answer. A fact vote starts empty: the user picks one.
+ */
+export function pollDefault(state: Pick<DiveState, 'answers'>, slot: SlotKey): number | null {
+  if (slot === BEFORE) return DEFAULT_START_VALUE;
+  if (slot === AFTER) return state.answers[BEFORE] ?? DEFAULT_START_VALUE;
+  return null;
 }
 
 export function currentScreen(state: DiveState): Screen {
@@ -197,11 +207,13 @@ export function diveReducer(state: DiveState, action: DiveAction): DiveState {
     case 'set_draft': {
       const slot = currentSlot(state);
       if (slot === null || isCommitted(state, slot) || state.pending) return state;
+      if (slot !== BEFORE && slot !== AFTER) return isFactVote(action.value) ? { ...state, draft: action.value } : state;
       return { ...state, draft: clampValue(action.value) };
     }
     case 'commit_start': {
       const slot = currentSlot(state);
       if (slot === null || isCommitted(state, slot) || state.pending || state.sessionId === null) return state;
+      if (state.draft === null) return state;
       return { ...state, pending: true, error: null };
     }
     case 'commit_success': {

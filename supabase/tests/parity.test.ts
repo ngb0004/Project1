@@ -177,32 +177,35 @@ describe('numeric emulation matches Postgres', () => {
 });
 
 describe('LocalDiveApi crowd math matches the database', () => {
+  // Fact votes: 0 disagree, 50 not sure, 100 agree.
+  const [D, U, A] = [0, 50, 100];
+
   it('an empty version', async () => {
     const v = await freshVersion('fixture-harbor-bridge');
     const { steps, final } = await expectParity(v, [], true);
-    expect(steps[0].histogram).toBeNull();
-    expect(final.top_step_id).toBeNull();
+    expect(steps[0].votes).toBeNull();
+    expect(final.most_split_step_id).toBeNull();
   });
 
-  it('hand-built edge cases: shift buckets, bin edges, unfinished and excluded sessions, fractional seed weight', async () => {
+  it('hand-built edge cases: bin edges, unfinished and excluded sessions, fractional seed weight', async () => {
     // harbor-bridge: slots are before, s1..s4, after (indexes 0..5)
     const v = await freshVersion('fixture-harbor-bridge', 7);
     const rows = await insert(v, [
       // real, completed (3 real completions -> seed weight 1 - 3/7)
-      { values: [50, 35, 36, 50, 49, 49] }, // -15, +1, +14, -1, 0
-      { values: [100, 86, 100, 100, 85, 85] }, // -14, +14, 0, -15, 0
-      { values: [0, 15, 9, 10, 99, 100] }, // +15, -6, +1, +89, +1
-      // real, unfinished: counts at the steps it answered, never in the final crowd
-      { values: [60, 60, 20] },
+      { values: [50, A, U, D, A, 49] },
+      { values: [100, D, A, A, U, 85] },
+      { values: [0, A, A, U, D, 100] },
+      // real, unfinished: counts at the facts it answered, never in the final crowd
+      { values: [60, U, D] },
       { values: [40] },
       // real, completed but excluded (reading-time floor): counts nowhere
-      { excluded: true, values: [10, 90, 90, 90, 90, 90] },
+      { excluded: true, values: [10, A, A, A, A, 90] },
       // seeded, completed
-      { is_seed: true, values: [70, 70, 55, 55, 55, 60] },
-      { is_seed: true, values: [20, 34, 34, 20, 20, 20] },
-      { is_seed: true, values: [95, 95, 95, 95, 95, 95] },
+      { is_seed: true, values: [70, D, D, U, A, 60] },
+      { is_seed: true, values: [20, A, U, D, D, 20] },
+      { is_seed: true, values: [95, U, U, U, U, 95] },
       // seeded, unfinished
-      { is_seed: true, values: [30, 45] },
+      { is_seed: true, values: [30, D] },
     ]);
     const { steps, final } = await expectParity(v, rows, true);
     expect(steps[0].seed_weight).toBe(0.5714);
@@ -215,50 +218,49 @@ describe('LocalDiveApi crowd math matches the database', () => {
 
   it('rounds halves away from zero exactly as Postgres numeric does', async () => {
     const v = await freshVersion('fixture-harbor-bridge');
-    const planned: Planned[] = Array.from({ length: 160 }, () => ({ values: flat(6, 50) }));
-    planned[0]!.values = [50, 51, 51, 51, 51, 51]; // s1: 1/160 moved = 0.00625 -> 0.0063; mean_delta 0.00625 -> 0.01
-    for (const i of [1, 2, 3, 4]) planned[i]!.values = [50, 50, 49, 49, 49, 49]; // s2: mean_delta -4/160 = -0.025 -> -0.03
-    planned[5]!.values = [50, 50, 50, 30, 30, 30]; // s3: mean_delta -20/160 = -0.125 -> -0.13
+    const planned: Planned[] = Array.from({ length: 160 }, () => ({ values: [50, U, U, U, U, 50] }));
+    planned[0]!.values = [50, A, U, U, U, 50]; // s1: 1/160 agree = 0.00625 -> 0.0063
+    for (const i of [1, 2, 3, 4]) planned[i]!.values = [50, U, D, U, U, 50]; // s2: 4/160 disagree = 0.025
     const rows = await insert(v, planned);
     const { steps, final } = await expectParity(v, rows, true);
-    expect(steps[0].moved_share).toBe(0.0063);
-    expect(steps[1].mean_delta).toBe(-0.03);
-    expect(steps[2].mean_delta).toBe(-0.13);
-    expect(final.top_step_id).toBe('s3');
+    expect(steps[0].votes.agree).toBe(0.0063);
+    expect(steps[1].votes.disagree).toBe(0.025);
+    // s3 and s4: everyone not sure, an even split (1); the earlier one wins
+    expect(final.most_split_step_id).toBe('s3');
   });
 
-  it('ties for the step that moved the crowd most go to the earlier step', async () => {
+  it('ties for the most split fact go to the earlier fact', async () => {
     const v = await freshVersion('fixture-harbor-bridge');
     const rows = await insert(v, [
-      { values: [50, 50, 40, 40, 50, 50] }, // s2 -10, s4 +10
-      { values: [70, 70, 75, 75, 70, 70] }, // s2 +5, s4 -5
+      { values: [50, A, A, D, A, 50] },
+      { values: [70, A, D, A, A, 70] }, // s2 and s3 split evenly
     ]);
     const { final } = await expectParity(v, rows, true);
-    expect(final.top_step_id).toBe('s2');
+    expect(final.most_split_step_id).toBe('s2');
   });
 
-  it('nobody moved: no step is named as moving the crowd', async () => {
+  it('a fact vote other than 0, 50 or 100 is refused', async () => {
     const v = await freshVersion('fixture-harbor-bridge');
-    const rows = await insert(v, [{ values: flat(6, 40) }, { values: flat(6, 60) }]);
-    const { final } = await expectParity(v, rows, true);
-    expect(final.top_step_id).toBeNull();
+    await expect(insert(v, [{ values: [50, 40] }])).rejects.toThrow(/fact vote/);
+    // the main question takes any whole number from 0 to 100
+    await insert(v, [{ values: [37] }]);
   });
 
   it('seeds that have fully faded (or are left out) are not counted at all', async () => {
     const v = await freshVersion('fixture-harbor-bridge', 2);
     const seeds: Planned[] = [
-      { is_seed: true, values: [10, 30, 30, 30, 30, 30] },
-      { is_seed: true, values: [90, 80, 80, 80, 80, 80] },
+      { is_seed: true, values: [10, A, A, A, A, 30] },
+      { is_seed: true, values: [90, D, D, D, D, 80] },
     ];
     const seedRows = await insert(v, seeds);
     // Seeds only, include_seed false: rows exist but carry no weight.
     const left = await expectParity(v, seedRows, false);
-    expect(left.steps[0]).toMatchObject({ n_seed: 0, histogram: null, mean_delta: null, shift: null });
-    expect(left.final.steps[0]).toMatchObject({ mean_delta: null, moved_share: 0 });
-    expect(left.final).toMatchObject({ n_seed: 0, before_histogram: null, after_histogram: null, top_step_id: null });
+    expect(left.steps[0]).toMatchObject({ n_seed: 0, votes: null });
+    expect(left.final.steps[0]).toMatchObject({ votes: null });
+    expect(left.final).toMatchObject({ n_seed: 0, before_histogram: null, after_histogram: null, most_split_step_id: null });
 
     // Two real completions reach the threshold of 2: seed weight 0.
-    const real = await insert(v, [{ values: [50, 55, 55, 55, 55, 55] }, { values: [20, 20, 20, 20, 20, 25] }]);
+    const real = await insert(v, [{ values: [50, A, U, U, U, 55] }, { values: [20, U, U, U, U, 25] }]);
     const rows = [...seedRows, ...real];
     const { steps } = await expectParity(v, rows, true);
     expect(steps[0]).toMatchObject({ seed_weight: 0, seeded_share: 0, n_seed: 0, n_real: 2 });
@@ -275,14 +277,11 @@ describe('LocalDiveApi crowd math matches the database', () => {
       const v = await freshVersion(fixture, 200);
       const slots = v.stepIds.length + 2;
       const planned: Planned[] = Array.from({ length: 120 }, () => {
-        let value = rng() < 0.15 ? (rng() < 0.5 ? 0 : 100) : int(0, 100);
-        const values = [value];
+        const before = rng() < 0.15 ? (rng() < 0.5 ? 0 : 100) : int(0, 100);
+        const values = [before];
         const answered = rng() < 0.75 ? slots : int(1, slots - 1);
         for (let i = 1; i < answered; i++) {
-          const r = rng();
-          if (r < 0.4) value = Math.max(0, Math.min(100, value + int(-30, 30)));
-          else if (r < 0.5) value = int(0, 100);
-          values.push(value);
+          values.push(i === slots - 1 ? Math.max(0, Math.min(100, before + int(-30, 30))) : [D, U, A][int(0, 2)]!);
         }
         return { is_seed: rng() < 0.4, excluded: rng() < 0.08, values };
       });

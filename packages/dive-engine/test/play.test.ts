@@ -1,7 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Layer, PublicCase, SeedProfileInput } from '@sia/case-schema';
 import {
+  CHECK_VERDICT_LABEL,
   CONFIDENCE_LABEL,
+  VOTE_LABEL,
+  VOTE_ORDER,
   caseUrl,
   crowdCountText,
   estimateMinutes,
@@ -10,6 +13,8 @@ import {
   seededNoteText,
   shareCardData,
   versionNoteText,
+  voteSplitText,
+  yourVoteText,
 } from '../src/copy';
 import {
   buildScreens,
@@ -46,10 +51,15 @@ function proseOf(doc: PublicCase): string[] {
     doc.question.scale.right_label,
     ...(doc.content_warning ? [doc.content_warning] : []),
     ...doc.starting_facts.map((f) => f.text),
-    ...doc.steps.flatMap((s) => [s.headline, s.body, s.micro_poll.prompt, ...s.depth.flatMap(layerText)]),
+    ...doc.steps.flatMap((s) => [s.headline, s.body, s.micro_poll.statement, ...s.depth.flatMap(layerText)]),
     ...doc.sides.flatMap((s) => [s.label, s.steelman]),
+    ...doc.takes.flatMap(takeText),
     ...doc.open_questions,
   ];
+}
+
+function takeText(t: PublicCase['takes'][number]): string[] {
+  return [t.label, t.summary, ...(t.seen_on ? [t.seen_on] : []), ...t.checks.flatMap((c) => [c.claim, c.note])];
 }
 
 function layerText(layer: Layer): string[] {
@@ -100,14 +110,15 @@ function render(state: DiveState): Rendered {
       break;
     case 'step': {
       const step = stepById(doc, screen.stepId)!;
-      out.record.push(step.headline, step.body, step.micro_poll.prompt, scale.left_label, scale.right_label);
-      out.chrome.push(CONFIDENCE_LABEL[step.confidence], 'Flag this fact');
+      out.record.push(step.headline, step.body, step.micro_poll.statement);
+      out.chrome.push(CONFIDENCE_LABEL[step.confidence], 'Flag this fact', ...VOTE_ORDER.map((k) => VOTE_LABEL[k]));
       if (step.depth.length > 0) out.chrome.push('Go deeper');
       if (state.expanded[step.id]) out.record.push(...step.depth.flatMap(layerText));
       const r = visibleReveal(state, step.id);
       if (r && isStepReveal(r)) {
         out.crowd = true;
-        out.chrome.push(mirrorText(r.previous_value, r.value), crowdCountText(r.crowd.n_real));
+        out.chrome.push(yourVoteText(r.value, r.crowd.votes), crowdCountText(r.crowd.n_real));
+        if (r.crowd.votes) out.chrome.push(voteSplitText(r.crowd.votes));
         const seeded = seededNoteText(r.crowd.seeded_share);
         if (seeded) out.chrome.push(seeded);
         const note = versionNoteText(r.version_note);
@@ -115,11 +126,15 @@ function render(state: DiveState): Rendered {
       }
       break;
     }
+    case 'takes':
+      out.record.push(...doc.takes.flatMap(takeText));
+      out.chrome.push(...doc.takes.flatMap((t) => t.checks.map((c) => CHECK_VERDICT_LABEL[c.verdict])));
+      break;
     case 'final': {
       const r = visibleReveal(state, 'after');
       if (r && isFinalReveal(r)) {
         out.crowd = true;
-        for (const id of [r.you.top_step_id, r.crowd.top_step_id]) if (id) out.record.push(stepById(doc, id)!.headline);
+        if (r.crowd.most_split_step_id) out.record.push(stepById(doc, r.crowd.most_split_step_id)!.headline);
         out.record.push(...doc.open_questions, scale.left_label, scale.right_label);
         out.chrome.push(mirrorText(r.you.answers[0]!.value, r.value));
         const seeded = seededNoteText(r.crowd.seeded_share);
@@ -147,19 +162,18 @@ function seedProfileFor(doc: PublicCase): SeedProfileInput {
     sessions: 120,
     before_bins: [1, 1, 2, 3, 4, 4, 3, 2, 1, 1],
     steps: Object.fromEntries(
-      doc.steps.map((s, i) => [s.id, { move_share: 0.4, mean_shift: i % 2 === 0 ? -8 : 6, spread: 5 }]),
+      doc.steps.map((s, i) => [s.id, i % 2 === 0 ? { agree: 3, unsure: 1, disagree: 1 } : { agree: 1, unsure: 1, disagree: 2 }]),
     ),
     after: { move_share: 0.1, mean_shift: 0, spread: 3 },
     rng_seed: 42,
   };
 }
 
-/** The answers our reader gives: Before 72, then some steps move them and some do not. */
+const VOTES = [100, 50, 0];
+
+/** The answers our reader gives: Before 72, a mix of fact votes, then After 69. */
 function plannedValues(doc: PublicCase): number[] {
-  const values = [72];
-  doc.steps.forEach((_, i) => values.push(Math.max(0, Math.min(100, values[i]! + (i % 3 === 1 ? 0 : i % 2 === 0 ? -9 : 4)))));
-  values.push(values[values.length - 1]! - 3);
-  return values;
+  return [72, ...doc.steps.map((_, i) => VOTES[i % 3]!), 69];
 }
 
 interface PlayResult {
@@ -184,7 +198,8 @@ async function playThrough(name: FixtureName): Promise<PlayResult> {
   for (let r = 0; r < 3; r++) {
     const s = await api.startSession(fixture.id, fixture.version, deviceId());
     for (const [i, slot] of ['before', ...fixture.steps.map((x) => x.id), 'after'].entries()) {
-      await api.submit(s.session_id, slot, (i * 17 + r * 31) % 101);
+      const isFact = slot !== 'before' && slot !== 'after';
+      await api.submit(s.session_id, slot, isFact ? VOTES[(i + r) % 3]! : (i * 17 + r * 31) % 101);
     }
   }
 
@@ -212,7 +227,11 @@ async function playThrough(name: FixtureName): Promise<PlayResult> {
       expect(allowed.has(text), `${kind}: "${text}" is not in the record`).toBe(true);
     }
     // ...and the interface's own copy never carries case content.
-    for (const text of r.chrome) for (const p of prose) expect(text.includes(p), `${kind}: "${text}"`).toBe(false);
+    // (The generic answer words may also be a case's slider labels.)
+    const generic = new Set(VOTE_ORDER.map((k) => VOTE_LABEL[k].toLowerCase()));
+    for (const text of r.chrome) {
+      for (const p of prose) if (!generic.has(p.toLowerCase())) expect(text.includes(p), `${kind}: "${text}"`).toBe(false);
+    }
     // The crowd is on screen only once this screen's slot (or the After slot) is committed.
     const slot = currentSlot(state) ?? (kind === 'final' || kind === 'share' ? 'after' : null);
     if (slot !== null && !(slot in state.answers)) expect(r.crowd, `${kind}: crowd before commit`).toBe(false);
@@ -241,8 +260,8 @@ async function playThrough(name: FixtureName): Promise<PlayResult> {
       expect(before.crowd).toBe(false);
 
       const index = result.slots.length - 1;
-      const previous = index === 0 ? null : values[index - 1]!;
-      if (previous !== null) expect(state.draft, 'slider pre-filled at the last value').toBe(previous);
+      // Before starts at 50, a fact vote starts empty, After starts at the Before answer.
+      expect(state.draft).toBe(slot === 'before' ? 50 : slot === 'after' ? values[0] : null);
       dispatch({ type: 'set_draft', value: values[index]! }, { type: 'commit_start' });
       const reveal = await api.submit(state.sessionId!, slot, state.draft!);
       dispatch({ type: 'commit_success', reveal });
@@ -250,13 +269,15 @@ async function playThrough(name: FixtureName): Promise<PlayResult> {
       expect(visibleReveal(state, slot)).toEqual(reveal);
       expect(reveal).toMatchObject({ step_id: slot, value: values[index], locked: false });
       if (isStepReveal(reveal)) {
-        expect(reveal.previous_value).toBe(previous);
         expect(reveal.crowd.n_real).toBe(4);
         expect(reveal.crowd.n_seed).toBe(120);
         expect(reveal.crowd.seeded_share).toBeGreaterThan(0);
-        expect(check().chrome).toContain(mirrorText(previous!, values[index]!));
+        expect(check().chrome).toContain(yourVoteText(values[index]!, reveal.crowd.votes));
       }
-      if (isFinalReveal(reveal)) result.finalValues = reveal.you.answers.map((a) => a.value);
+      if (isFinalReveal(reveal)) {
+        expect(reveal.previous_value).toBe(values[0]);
+        result.finalValues = reveal.you.answers.map((a) => a.value);
+      }
       expect(canAdvance(state)).toBe(true);
 
       // Flag the first fact, as a reader might.
@@ -270,7 +291,7 @@ async function playThrough(name: FixtureName): Promise<PlayResult> {
         dispatch({ type: 'set_draft', value: 0 }, { type: 'commit_start' });
         expect(state.answers[prevSlot]).toBe(values[1]);
         expect(state.pending).toBe(false);
-        expect(await api.submit(state.sessionId!, prevSlot, 0)).toMatchObject({ value: values[1], locked: true });
+        expect(await api.submit(state.sessionId!, prevSlot, 50)).toMatchObject({ value: values[1], locked: true });
         dispatch({ type: 'next' });
         expect(currentSlot(state)).toBe(slot);
       }
@@ -285,7 +306,7 @@ async function playThrough(name: FixtureName): Promise<PlayResult> {
         dispatch({ type: 'go_to', cursor: resumeCursor(state) });
         const next = currentSlot(state)!;
         expect(next).toBe(doc.steps[3]?.id ?? 'after');
-        expect(state.draft).toBe(values[3]);
+        expect(state.draft).toBeNull(); // a fresh fact vote
         for (const a of resumed.answers) {
           expect(visibleReveal(state, a.step_id)).toBeNull(); // not until re-fetched
           dispatch({ type: 'reveal_loaded', reveal: await api.getReveal(state.sessionId!, a.step_id) });
@@ -326,7 +347,9 @@ describe.each(FIXTURES)('%s plays through the full flow', (name) => {
     const n = doc.steps.length;
     // Every screen once, in order (the restart resumed exactly where the reader left off).
     expect(r.visited).toEqual(buildScreens(doc).map((s) => s.kind));
-    expect(r.visited).toHaveLength(n + 6);
+    expect(r.visited).toHaveLength(n + 7);
+    // The online-takes screen showed every take and its checks.
+    expect(r.renders.takes![0]!.record).toEqual(doc.takes.flatMap(takeText));
     expect(r.slots).toEqual(['before', ...doc.steps.map((s) => s.id), 'after']);
     expect(r.finalValues).toEqual(plannedValues(doc));
 
@@ -334,13 +357,16 @@ describe.each(FIXTURES)('%s plays through the full flow', (name) => {
     const stepRenders = r.renders.step!.filter((x) => x.crowd);
     expect(stepRenders).toHaveLength(n);
     doc.steps.forEach((step, i) => {
-      expect(stepRenders[i]!.record).toEqual(expect.arrayContaining([step.headline, step.body, step.micro_poll.prompt, ...step.depth.flatMap(layerText)]));
+      expect(stepRenders[i]!.record).toEqual(expect.arrayContaining([step.headline, step.body, step.micro_poll.statement, ...step.depth.flatMap(layerText)]));
     });
     // The case card shows the content warning exactly when the record has one.
     const card = r.renders.case_card![0]!;
     expect(card.record.includes(doc.content_warning ?? '')).toBe(Boolean(doc.content_warning));
     // The final reveal and share card are built from the record too.
     expect(r.renders.final!.at(-1)!.record).toEqual(expect.arrayContaining(doc.open_questions));
+    // The final reveal compares After with Before.
+    const [before, after] = [plannedValues(doc)[0]!, plannedValues(doc).at(-1)!];
+    expect(r.renders.final!.at(-1)!.chrome).toContain(mirrorText(before, after));
     expect(r.renders.share!.at(-1)!.record).toEqual([doc.title, doc.question.prompt, doc.question.scale.left_label, doc.question.scale.right_label]);
   });
 });
@@ -350,12 +376,12 @@ describe('two different case files, no code change', () => {
     const [a, b] = FIXTURES.map((f) => results.get(f)!);
     expect(a && b).toBeTruthy();
     const screens = (r: PlayResult) => r.visited.length;
-    expect(screens(a!)).toBe(a!.doc.steps.length + 6);
-    expect(screens(b!)).toBe(b!.doc.steps.length + 6);
+    expect(screens(a!)).toBe(a!.doc.steps.length + 7);
+    expect(screens(b!)).toBe(b!.doc.steps.length + 7);
     expect(screens(a!)).not.toBe(screens(b!));
     expect(a!.doc.sides.length).not.toBe(b!.doc.sides.length);
     expect(Boolean(a!.doc.content_warning)).not.toBe(Boolean(b!.doc.content_warning));
-    const pollWords = (r: PlayResult) => new Set(r.doc.steps.map((s) => s.micro_poll.prompt));
+    const pollWords = (r: PlayResult) => new Set(r.doc.steps.map((s) => s.micro_poll.statement));
     expect(pollWords(a!)).not.toEqual(pollWords(b!));
   });
 

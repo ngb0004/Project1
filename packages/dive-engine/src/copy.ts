@@ -1,15 +1,53 @@
 import type { Confidence, PublicCase } from '@sia/case-schema';
-import type { FinalReveal, VersionNote } from './types';
+import type { FinalReveal, VersionNote, VoteSplit } from './types';
 
 /**
  * Generic interface copy. Every case-specific string (titles, facts, prompts,
  * labels, poll wording) comes from the case record; these helpers only frame it.
  */
 
+/** Before -> After on the main question. */
 export function mirrorText(previous: number, value: number): string {
-  if (previous === value) return "This didn't move you.";
+  if (previous === value) return 'You ended where you started.';
   return `You moved from ${previous} to ${value}.`;
 }
+
+export type VoteKey = keyof VoteSplit;
+
+/** The three fact votes, in the order the buttons show them. */
+export const VOTE_ORDER: readonly VoteKey[] = ['agree', 'unsure', 'disagree'];
+export const VOTE_VALUE: Record<VoteKey, number> = { agree: 100, unsure: 50, disagree: 0 };
+export const VOTE_LABEL: Record<VoteKey, string> = { agree: 'Agree', unsure: 'Not sure', disagree: 'Disagree' };
+
+export function voteKeyOf(value: number): VoteKey | null {
+  return VOTE_ORDER.find((k) => VOTE_VALUE[k] === value) ?? null;
+}
+
+const pct = (x: number) => `${Math.round(x * 100)}%`;
+
+/** "You agreed, like 62% of readers." */
+export function yourVoteText(value: number, votes: VoteSplit | null): string {
+  const key = voteKeyOf(value);
+  if (!key) return '';
+  const verb = key === 'agree' ? 'You agreed' : key === 'disagree' ? 'You disagreed' : "You weren't sure";
+  if (!votes) return `${verb}.`;
+  const share = votes[key];
+  if (share === 0) return `${verb}. Nobody else has so far.`;
+  return `${verb}, like ${pct(share)} of readers.`;
+}
+
+/** "62% agree · 21% not sure · 17% disagree" */
+export function voteSplitText(votes: VoteSplit): string {
+  return VOTE_ORDER.map((k) => `${pct(votes[k])} ${VOTE_LABEL[k].toLowerCase()}`).join(' · ');
+}
+
+export const CHECK_VERDICT_LABEL = {
+  holds_up: 'Holds up',
+  partly: 'Partly true',
+  not_backed: 'Not backed up',
+  false: 'False',
+  unknown: 'Not known yet',
+} as const;
 
 export const CONFIDENCE_LABEL: Record<Confidence, string> = {
   established: 'Established',
@@ -28,11 +66,14 @@ export const CONFIDENCE_HINT: Record<Confidence, string> = {
 const wordCount = (s: string | undefined) => (s ? s.trim().split(/\s+/).filter(Boolean).length : 0);
 
 /** Estimated minutes to finish a dive: reading at 220 wpm plus ~12 seconds per poll. */
-export function estimateMinutes(doc: Pick<PublicCase, 'starting_facts' | 'steps' | 'question'>): number {
+export function estimateMinutes(
+  doc: Pick<PublicCase, 'starting_facts' | 'steps' | 'question'> & { takes?: PublicCase['takes'] },
+): number {
   const words =
     wordCount(doc.question.prompt) +
     doc.starting_facts.reduce((a, f) => a + wordCount(f.text), 0) +
-    doc.steps.reduce((a, s) => a + wordCount(s.headline) + wordCount(s.body), 0);
+    doc.steps.reduce((a, s) => a + wordCount(s.headline) + wordCount(s.body) + wordCount(s.micro_poll.statement), 0) +
+    (doc.takes ?? []).reduce((a, t) => a + wordCount(t.summary) + t.checks.reduce((b, c) => b + wordCount(c.claim), 0), 0);
   const polls = doc.steps.length + 2;
   return Math.max(1, Math.round(words / 220 + (polls * 12) / 60));
 }

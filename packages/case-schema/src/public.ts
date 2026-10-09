@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { Case, Fact, Question, Side, Source, Step } from './schema';
+import { Case, Fact, Question, Side, Source, Step, Take, TakeCheck } from './schema';
 
 /**
  * The client-facing projection of a case. Admin-only fields (`favors`, `impact`,
- * `evidence`, `review`, `status`) never reach the dive app.
+ * `evidence` on steps, facts and take checks, `review`, `status`) never reach the dive app.
  *
  * The database computes the same projection in SQL (`public.case_public_projection`)
  * and the tests check that the two agree.
@@ -20,11 +20,16 @@ export type PublicStep = z.infer<typeof PublicStep>;
 export const PublicFact = Fact.omit({ evidence: true }).strict();
 export type PublicFact = z.infer<typeof PublicFact>;
 
+export const PublicTakeCheck = TakeCheck.omit({ evidence: true }).strict();
+export const PublicTake = Take.extend({ checks: z.array(PublicTakeCheck).min(1).max(6) }).strict();
+export type PublicTake = z.infer<typeof PublicTake>;
+
 export const PublicCase = Case.omit({ review: true, status: true })
   .extend({
     starting_facts: z.array(PublicFact).min(1),
     steps: z.array(PublicStep).min(1),
     sides: z.array(Side).min(2),
+    takes: z.array(PublicTake),
     sources: z.array(Source).min(1),
     question: Question,
   })
@@ -44,5 +49,6 @@ export function toPublicCase(c: Case): PublicCase {
     ...base,
     starting_facts: c.starting_facts.map((f) => omit(f, ['evidence'])),
     steps: c.steps.map((s) => omit(s, ADMIN_ONLY_STEP_KEYS)),
+    takes: c.takes.map((t) => ({ ...t, checks: t.checks.map((ch) => omit(ch, ['evidence'])) })),
   });
 }

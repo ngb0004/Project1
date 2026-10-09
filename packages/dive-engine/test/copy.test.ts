@@ -9,6 +9,8 @@ import {
   estimateMinutes,
   formatDate,
   mirrorText,
+  voteSplitText,
+  yourVoteText,
   seededNoteText,
   shareCardData,
   shareHeadline,
@@ -23,7 +25,18 @@ describe('personal mirror', () => {
   it('says how far the user moved, or that they did not', () => {
     expect(mirrorText(90, 75)).toBe('You moved from 90 to 75.');
     expect(mirrorText(20, 35)).toBe('You moved from 20 to 35.');
-    expect(mirrorText(60, 60)).toBe("This didn't move you.");
+    expect(mirrorText(60, 60)).toBe('You ended where you started.');
+  });
+});
+
+describe('fact votes', () => {
+  it('names the vote and how many readers voted the same way', () => {
+    const votes = { agree: 0.62, unsure: 0.21, disagree: 0.17 };
+    expect(yourVoteText(100, votes)).toBe('You agreed, like 62% of readers.');
+    expect(yourVoteText(50, votes)).toBe("You weren't sure, like 21% of readers.");
+    expect(yourVoteText(0, { agree: 1, unsure: 0, disagree: 0 })).toBe('You disagreed. Nobody else has so far.');
+    expect(yourVoteText(0, null)).toBe('You disagreed.');
+    expect(voteSplitText(votes)).toBe('62% agree · 21% not sure · 17% disagree');
   });
 });
 
@@ -40,12 +53,12 @@ describe('estimateMinutes', () => {
       depth: [],
       source_ids: ['x'],
       confidence: 'established' as const,
-      micro_poll: { prompt: 'p', re_ask_slider: true as const },
+      micro_poll: { statement: 's' },
     })),
   });
 
   it('reads at 220 words a minute plus about 12 seconds per poll', () => {
-    // 660 words = 3 min; 3 steps + before + after = 5 polls = 1 min
+    // 660 words (+ 1 per statement) = 3 min; 3 steps + before + after = 5 polls = 1 min
     expect(estimateMinutes(doc([220, 220, 200], 10, 10))).toBe(4);
     expect(estimateMinutes(doc([1]))).toBe(1);
   });
@@ -141,7 +154,7 @@ describe('share card', () => {
     const doc = loadFixture(name);
     const api = new LocalDiveApi({ cases: [{ doc }] });
     const s = await api.startSession(doc.id, doc.version, deviceId());
-    const values = [95, ...doc.steps.map((_, i) => 90 - i * 5), 70];
+    const values = [95, ...doc.steps.map((_, i) => [100, 50, 0][i % 3]!), 70];
     let last;
     for (const [i, slot] of ['before', ...doc.steps.map((x) => x.id), 'after'].entries()) {
       last = await api.submit(s.session_id, slot, values[i]!);

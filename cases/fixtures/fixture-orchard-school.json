@@ -8,32 +8,38 @@
   "as_of": "2026-09-15",
   "content_warning": "This fictional fixture describes a serious allergic reaction involving a child.",
   "question": {
-    "prompt": "How much of the blame for the incident falls on the school district?",
+    "prompt": "The school district is mostly to blame for the allergy incident.",
     "scale": {
       "type": "slider",
       "min": 0,
       "max": 100,
-      "left_label": "None of it",
-      "right_label": "All of it"
+      "left_label": "Disagree",
+      "right_label": "Agree"
     }
   },
   "starting_facts": [
     {
       "id": "base-1",
       "text": "A student had an allergic reaction at the fictional Orchard School cafeteria in March 2026.",
-      "source_ids": ["src-district-statement"],
+      "source_ids": [
+        "src-district-statement"
+      ],
       "confidence": "established"
     },
     {
       "id": "base-2",
       "text": "The student recovered after treatment at a hospital.",
-      "source_ids": ["src-district-statement"],
+      "source_ids": [
+        "src-district-statement"
+      ],
       "confidence": "established"
     },
     {
       "id": "base-3",
       "text": "The family has filed a civil complaint against the district and the food vendor.",
-      "source_ids": ["src-complaint"],
+      "source_ids": [
+        "src-complaint"
+      ],
       "confidence": "established"
     }
   ],
@@ -46,9 +52,13 @@
       "depth": [],
       "favors": "district",
       "impact": "high",
-      "source_ids": ["src-complaint"],
+      "source_ids": [
+        "src-complaint"
+      ],
       "confidence": "alleged",
-      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+      "micro_poll": {
+        "statement": "The school should have checked the ingredients itself."
+      }
     },
     {
       "id": "vendor-change",
@@ -66,9 +76,13 @@
       ],
       "favors": "vendor",
       "impact": "high",
-      "source_ids": ["src-vendor-log"],
+      "source_ids": [
+        "src-vendor-log"
+      ],
       "confidence": "established",
-      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+      "micro_poll": {
+        "statement": "The vendor should have told the school about the new recipe."
+      }
     },
     {
       "id": "epipen",
@@ -78,9 +92,13 @@
       "depth": [],
       "favors": "neutral",
       "impact": "medium",
-      "source_ids": ["src-incident-log"],
+      "source_ids": [
+        "src-incident-log"
+      ],
       "confidence": "established",
-      "micro_poll": { "prompt": "Did this move you?", "re_ask_slider": true }
+      "micro_poll": {
+        "statement": "Staff did their job well once the reaction started."
+      }
     },
     {
       "id": "training",
@@ -93,14 +111,20 @@
           "id": "training-rules",
           "title": "What the state requires",
           "body": "The fictional state rule requires annual allergy-response training for cafeteria staff.",
-          "source_ids": ["src-state-records"]
+          "source_ids": [
+            "src-state-records"
+          ]
         }
       ],
       "favors": "district",
       "impact": "medium",
-      "source_ids": ["src-state-records"],
+      "source_ids": [
+        "src-state-records"
+      ],
       "confidence": "established",
-      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+      "micro_poll": {
+        "statement": "The district let staff training slip too far."
+      }
     },
     {
       "id": "parent-form",
@@ -118,9 +142,14 @@
       ],
       "favors": "family-shared",
       "impact": "medium",
-      "source_ids": ["src-district-statement", "src-news-1"],
+      "source_ids": [
+        "src-district-statement",
+        "src-news-1"
+      ],
       "confidence": "disputed",
-      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+      "micro_poll": {
+        "statement": "Keeping the allergy form up to date was the family’s job."
+      }
     },
     {
       "id": "other-districts",
@@ -130,27 +159,122 @@
       "depth": [],
       "favors": "district",
       "impact": "low",
-      "source_ids": ["src-analysis"],
+      "source_ids": [
+        "src-analysis"
+      ],
       "confidence": "reported",
-      "micro_poll": { "prompt": "Does this change your position?", "re_ask_slider": true }
+      "micro_poll": {
+        "statement": "This district should copy its neighbors’ rule."
+      }
     }
   ],
   "sides": [
-    { "id": "district", "label": "The district failed", "steelman": "The district let training lapse and had no rule requiring vendors to report recipe changes." },
-    { "id": "vendor", "label": "The vendor failed", "steelman": "The vendor changed an ingredient source without telling anyone." },
-    { "id": "family-shared", "label": "Responsibility is shared", "steelman": "Paperwork gaps on all sides, including the family's, let this happen." }
+    {
+      "id": "district",
+      "label": "The district failed",
+      "steelman": "The district let training lapse and had no rule requiring vendors to report recipe changes."
+    },
+    {
+      "id": "vendor",
+      "label": "The vendor failed",
+      "steelman": "The vendor changed an ingredient source without telling anyone."
+    },
+    {
+      "id": "family-shared",
+      "label": "Responsibility is shared",
+      "steelman": "Paperwork gaps on all sides, including the family's, let this happen."
+    }
   ],
   "open_questions": [
     "Did the vendor send any notice that the district did not receive?",
     "Will the state audit the district's training records?"
   ],
   "sources": [
-    { "id": "src-district-statement", "title": "District statement on March incident (fixture)", "publisher": "Fixture School District", "url": "https://example.org/fixtures/orchard/statement", "date": "2026-03-12", "type": "official", "accessed_at": "2026-09-15T09:00:00Z" },
-    { "id": "src-complaint", "title": "Civil complaint (fixture)", "publisher": "Fixture County Court", "url": "https://example.org/fixtures/orchard/complaint", "date": "2026-05-01", "type": "court_record", "accessed_at": "2026-09-15T09:00:00Z", "quote_excerpt": "The menu card provided no warning of peanut content." },
-    { "id": "src-vendor-log", "title": "Vendor recipe change log (fixture)", "publisher": "Fixture Foods Inc", "url": "https://example.org/fixtures/orchard/vendor-log", "date": "2026-03-02", "type": "primary", "accessed_at": "2026-09-15T09:00:00Z" },
-    { "id": "src-incident-log", "title": "District incident log (fixture)", "publisher": "Fixture School District", "url": "https://example.org/fixtures/orchard/incident-log", "date": "2026-03-09", "type": "official", "accessed_at": "2026-09-15T09:00:00Z" },
-    { "id": "src-state-records", "title": "State certification records (fixture)", "publisher": "Fixture State Education Dept", "url": "https://example.org/fixtures/orchard/certs", "date": "2026-04", "type": "official", "accessed_at": "2026-09-15T09:00:00Z" },
-    { "id": "src-news-1", "title": "Family's lawyer speaks (fixture)", "publisher": "Fixture Daily", "url": "https://example.org/fixtures/orchard/news-1", "date": "2026-05-03", "type": "news", "accessed_at": "2026-09-15T09:00:00Z" },
-    { "id": "src-analysis", "title": "How districts handle vendor changes (fixture)", "publisher": "Fixture Policy Institute", "url": "https://example.org/fixtures/orchard/analysis", "date": "2026-06", "type": "analysis", "accessed_at": "2026-09-15T09:00:00Z" }
+    {
+      "id": "src-district-statement",
+      "title": "District statement on March incident (fixture)",
+      "publisher": "Fixture School District",
+      "url": "https://example.org/fixtures/orchard/statement",
+      "date": "2026-03-12",
+      "type": "official",
+      "accessed_at": "2026-09-15T09:00:00Z"
+    },
+    {
+      "id": "src-complaint",
+      "title": "Civil complaint (fixture)",
+      "publisher": "Fixture County Court",
+      "url": "https://example.org/fixtures/orchard/complaint",
+      "date": "2026-05-01",
+      "type": "court_record",
+      "accessed_at": "2026-09-15T09:00:00Z",
+      "quote_excerpt": "The menu card provided no warning of peanut content."
+    },
+    {
+      "id": "src-vendor-log",
+      "title": "Vendor recipe change log (fixture)",
+      "publisher": "Fixture Foods Inc",
+      "url": "https://example.org/fixtures/orchard/vendor-log",
+      "date": "2026-03-02",
+      "type": "primary",
+      "accessed_at": "2026-09-15T09:00:00Z"
+    },
+    {
+      "id": "src-incident-log",
+      "title": "District incident log (fixture)",
+      "publisher": "Fixture School District",
+      "url": "https://example.org/fixtures/orchard/incident-log",
+      "date": "2026-03-09",
+      "type": "official",
+      "accessed_at": "2026-09-15T09:00:00Z"
+    },
+    {
+      "id": "src-state-records",
+      "title": "State certification records (fixture)",
+      "publisher": "Fixture State Education Dept",
+      "url": "https://example.org/fixtures/orchard/certs",
+      "date": "2026-04",
+      "type": "official",
+      "accessed_at": "2026-09-15T09:00:00Z"
+    },
+    {
+      "id": "src-news-1",
+      "title": "Family's lawyer speaks (fixture)",
+      "publisher": "Fixture Daily",
+      "url": "https://example.org/fixtures/orchard/news-1",
+      "date": "2026-05-03",
+      "type": "news",
+      "accessed_at": "2026-09-15T09:00:00Z"
+    },
+    {
+      "id": "src-analysis",
+      "title": "How districts handle vendor changes (fixture)",
+      "publisher": "Fixture Policy Institute",
+      "url": "https://example.org/fixtures/orchard/analysis",
+      "date": "2026-06",
+      "type": "analysis",
+      "accessed_at": "2026-09-15T09:00:00Z"
+    }
+  ],
+  "takes": [
+    {
+      "id": "center",
+      "lens": "center",
+      "label": "How the middle is telling it",
+      "summary": "A recipe change slipped through, and the school and vendor both missed it. This is a fictional test fixture.",
+      "source_ids": [
+        "src-news-1"
+      ],
+      "checks": [
+        {
+          "claim": "The vendor changed the recipe a week before.",
+          "verdict": "holds_up",
+          "note": "Reporting and records agree on the date.",
+          "source_ids": [
+            "src-news-1",
+            "src-district-statement"
+          ]
+        }
+      ]
+    }
   ]
 }

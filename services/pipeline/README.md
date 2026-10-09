@@ -30,9 +30,18 @@ pnpm --filter @sia/pipeline pipeline check case.json --snapshots <dir>          
 Models: `PIPELINE_MODEL_STRONG` (scoper, drafter, critics, editor; default
 `claude-opus-5-5`) and `PIPELINE_MODEL_FAST` (researchers; default
 `claude-sonnet-5-5`). Spend: `PIPELINE_BUDGET_USD` or `--budget-usd` caps each
-job (default $40; a measured three-round new case cost $18.20, an update with
-nothing new costs only its research). Each call is also capped by tier
-(`src/runner/claude.ts`).
+job across all its attempts (default $40; a measured three-round new case cost
+$18.20, an update with nothing new costs only its research). The worker records
+the job's spend in `pipeline_jobs.spent_usd` with every heartbeat, on release and
+on finish, and a job that runs again gets only what is left. A call that ends
+without its result (a timeout, a shutdown) is charged what its responses used,
+at list price. Each call is also capped by tier (`src/runner/claude.ts`).
+
+`open_source` fetches only public addresses: the connection's own DNS lookup is
+checked (so a name cannot resolve to a public address for a check and a private
+one for the fetch), a name that does not resolve is refused, and IPv6 forms
+that embed an IPv4 address are checked by that address. Page text is extracted
+in a worker thread with a time and memory limit (`src/research/extract.mjs`).
 
 ## Updates to a live case
 

@@ -1,0 +1,349 @@
+{
+  "ok": true,
+  "checks": [
+    {
+      "name": "job succeeded",
+      "ok": true,
+      "detail": "status succeeded"
+    },
+    {
+      "name": "package in the review queue",
+      "ok": true,
+      "detail": "version 1 is in_review and in staff_queue"
+    },
+    {
+      "name": "schema-valid",
+      "ok": true,
+      "detail": "0 errors, 10 warnings"
+    },
+    {
+      "name": "every source opened by this job (HTTP 200 snapshot)",
+      "ok": true,
+      "detail": "25/25"
+    },
+    {
+      "name": "every quote verbatim in its snapshot",
+      "ok": true,
+      "detail": "163 quotes checked; 0 failures"
+    },
+    {
+      "name": "review: hard questions",
+      "ok": true,
+      "detail": "29 (29 with a resolution)"
+    },
+    {
+      "name": "review: a bias report for every side",
+      "ok": true,
+      "detail": "6 reports; sides without one: none"
+    },
+    {
+      "name": "review: fact-check table",
+      "ok": true,
+      "detail": "325 rows"
+    },
+    {
+      "name": "review: balance summary",
+      "ok": true,
+      "detail": "{\"criminally-responsible\":4,\"lacked-criminal-responsibility\":4}"
+    },
+    {
+      "name": "review: open issues listed",
+      "ok": true,
+      "detail": "2 open issues"
+    },
+    {
+      "name": "every snapshot matches its sha256",
+      "ok": true,
+      "detail": "29/29"
+    },
+    {
+      "name": "every logged open with a snapshot has its snapshot row",
+      "ok": true,
+      "detail": "45 opens (32 usable), 29 snapshots"
+    },
+    {
+      "name": "research agents logged queries, opens and claims",
+      "ok": true,
+      "detail": "scoper: 2q/3o/16c, researcher#criminally-responsible: 6q/9o/18c, records_researcher#records: 12q/22o/32c, researcher#lacked-criminal-responsibility: 6q/11o/19c"
+    },
+    {
+      "name": "every agent ran and logged its call",
+      "ok": true,
+      "detail": "8 agents; plus 5 pipeline notes"
+    }
+  ],
+  "caseId": "ec738a33-f3dd-42a0-9a40-927bd2a04f27",
+  "version": 1,
+  "versionStatus": "in_review",
+  "schemaErrors": [],
+  "schemaWarnings": [
+    {
+      "path": "review.fact_check.25.target",
+      "code": "unknown_reference",
+      "message": "Fact-check row refers to unknown target \"layer:s4/q1\"."
+    },
+    {
+      "path": "review.fact_check.47.target",
+      "code": "unknown_reference",
+      "message": "Fact-check row refers to unknown target \"layer:s8/c1\"."
+    },
+    {
+      "path": "review.fact_check.81.target",
+      "code": "unknown_reference",
+      "message": "Fact-check row refers to unknown target \"open_questions\"."
+    },
+    {
+      "path": "review.fact_check.98.target",
+      "code": "unknown_reference",
+      "message": "Fact-check row refers to unknown target \"layer:s1/q1\"."
+    },
+    {
+      "path": "review.fact_check.125.target",
+      "code": "unknown_reference",
+      "message": "Fact-check row refers to unknown target \"layer:s4/q1\"."
+    },
+    {
+      "path": "review.fact_check.149.target",
+      "code": "unknown_reference",
+      "message": "Fact-check row refers to unknown target \"layer:s8/c1\"."
+    },
+    {
+      "path": "review.fact_check.150.target",
+      "code": "unknown_reference",
+      "message": "Fact-check row refers to unknown target \"layer:s8/c1\"."
+    },
+    {
+      "path": "review.fact_check.219.target",
+      "code": "unknown_reference",
+      "message": "Fact-check row refers to unknown target \"layer:s1/q1\"."
+    },
+    {
+      "path": "review.fact_check.246.target",
+      "code": "unknown_reference",
+      "message": "Fact-check row refers to unknown target \"layer:s4/c2\"."
+    },
+    {
+      "path": "review.fact_check.258.verdict",
+      "code": "review_mismatch",
+      "message": "The latest fact-check marks \"s6\" as uncited."
+    }
+  ],
+  "citationFailures": [],
+  "quotesChecked": 163,
+  "sources": [
+    {
+      "id": "src-keita",
+      "url": "https://case-law.vlex.com/vid/com-v-keita-893336347",
+      "snapshot_id": "f8a26147-1677-4359-a01d-7ecbe7415ed7",
+      "http_status": 200
+    },
+    {
+      "id": "src-wbur-insanity",
+      "url": "https://www.wbur.org/news/2026/09/01/massachusetts-lindsay-clancy-insanity-defense-criminal-liability",
+      "snapshot_id": "5d13d06a-ae32-4f46-9ce9-b9e6bedcd909",
+      "http_status": 200
+    },
+    {
+      "id": "src-da-indictment",
+      "url": "https://plymouthda.com/news/2023-press-releases/duxbury-woman-indicted-on-charges-that-she-murdered-her-three-children/",
+      "snapshot_id": "9d68a2f5-4e95-4d9e-95f4-403bd75f1d20",
+      "http_status": 200
+    },
+    {
+      "id": "src-nbc-nolle",
+      "url": "https://www.nbcboston.com/news/local/prosecutors-drop-redundant-charges-against-lindsay-clancy-ahead-of-trial/3979152/",
+      "snapshot_id": "a58f1003-db55-48e3-ba9c-70b52320a900",
+      "http_status": 200
+    },
+    {
+      "id": "src-wpri",
+      "url": "https://www.wpri.com/new-england/massachusetts/duxbury-mom-offers-to-admit-to-killing-her-3-kids-if-judge-splits-trial/amp/",
+      "snapshot_id": "5e7e8a98-54f6-4603-b91d-6c60b1c219db",
+      "http_status": 200
+    },
+    {
+      "id": "src-globe-april",
+      "url": "https://www.bostonglobe.com/2026/04/07/metro/lindsay-clancy-admit-killing-children/",
+      "snapshot_id": "1ec70cf5-ffa6-47ed-96e5-ddf1d3c60b9a",
+      "http_status": 200
+    },
+    {
+      "id": "src-kutv-aug4",
+      "url": "https://kutv.com/news/nation-world/testimony-continues-in-the-lindsay-clancy-murder-trial-aug-4-2026",
+      "snapshot_id": "d5b6172a-c64f-4952-a1da-83d520ff12f0",
+      "http_status": 200
+    },
+    {
+      "id": "src-wbur-929",
+      "url": "https://www.wbur.org/news/2026/09/29/lindsay-clancy-hearing-retrial-motion-to-dismiss",
+      "snapshot_id": "1551f648-0556-4c36-9c13-063900042c70",
+      "http_status": 200
+    },
+    {
+      "id": "src-globe-resnick",
+      "url": "https://www.bostonglobe.com/2026/08/21/metro/lindsay-clancy-trial-mack-resnick/",
+      "snapshot_id": "a60b758f-8a50-462d-9290-11794c71a49d",
+      "http_status": 200
+    },
+    {
+      "id": "src-foxla",
+      "url": "https://www.foxla.com/news/lindsay-clancy-trial-jurors-hear-conflicting-expert-testimony-mothers-mental-state",
+      "snapshot_id": "913f90c8-d288-4407-bc4a-b7cbc24c1fc7",
+      "http_status": 200
+    },
+    {
+      "id": "src-globe-motion",
+      "url": "https://www.bostonglobe.com/2026/09/10/metro/lindsay-clancy-motion-acquittal-retrial/",
+      "snapshot_id": "6fbc914f-8590-44c0-abad-8d7d0391b53c",
+      "http_status": 200
+    },
+    {
+      "id": "src-bostoncom-malpractice",
+      "url": "https://www.boston.com/news/crime/2026/01/27/lindsay-clancy-malpractice-lawsuit/",
+      "snapshot_id": "37c4e43a-b6c2-4b24-a177-644ede0673e1",
+      "http_status": 200
+    },
+    {
+      "id": "src-wfsb",
+      "url": "https://www.wfsb.com/2026/08/12/lindsay-clancy-repeatedly-asked-change-medications-psychiatric-nurse-says/",
+      "snapshot_id": "68231631-66f9-4270-a328-8a8f1bd2c805",
+      "http_status": 200
+    },
+    {
+      "id": "src-fox9",
+      "url": "https://www.fox9.com/news/members-lindsay-clancy-jury-open-up-holdout-juror",
+      "snapshot_id": "0a0542b6-404e-464a-82d2-a25046dfb0de",
+      "http_status": 200
+    },
+    {
+      "id": "src-wbur-closing",
+      "url": "https://www.wbur.org/news/2026/08/26/lindsay-clancy-murder-trial-testimony-closing-arguments",
+      "snapshot_id": "1be9daa9-00ee-4889-96f0-a8d10845454e",
+      "http_status": 200
+    },
+    {
+      "id": "src-katv",
+      "url": "https://katv.com/news/nation-world/lindsay-clancy-murder-trial-continues-following-autopsy-testimony-aug-7-2026",
+      "snapshot_id": "183d24ff-cdc5-454d-a56d-c536797a1a13",
+      "http_status": 200
+    },
+    {
+      "id": "src-washex",
+      "url": "https://www.washingtonexaminer.com/news/crime/4714008/lindsay-clancy-verdict-mistrial/",
+      "snapshot_id": "e520b045-c654-42ef-825f-bff8bcf86b15",
+      "http_status": 200
+    },
+    {
+      "id": "src-fox29",
+      "url": "https://www.fox29.com/news/lindsay-clancy-trial-juror-who-blocked-lindsay-clancy-verdict-disputes-fellow-jurors-claims-report",
+      "snapshot_id": "b9e4add3-03b4-4db1-901b-039418a1f72a",
+      "http_status": 200
+    },
+    {
+      "id": "src-massbrief",
+      "url": "https://buttondown.com/massbrief/archive/the-mass-brief-lindsay-clancy-is-back-in-court/",
+      "snapshot_id": "fd85ccba-42e1-4c71-9a44-45fc741fbccf",
+      "http_status": 200
+    },
+    {
+      "id": "src-bostoncom-dj",
+      "url": "https://www.boston.com/news/crime/2026/09/22/lindsay-clancy-motion-to-dismiss-double-jeopardy/",
+      "snapshot_id": "a5198914-58dc-4a90-a07c-f9ee589c89a9",
+      "http_status": 200
+    },
+    {
+      "id": "src-wbur-sept4",
+      "url": "https://www.wbur.org/news/2026/09/04/massachusetts-lindsay-clancy-day-7-jury-court-murder-trial",
+      "snapshot_id": "fac4af1f-a9f5-4b07-b6d7-afbf6f4a1298",
+      "http_status": 200
+    },
+    {
+      "id": "src-nbc-jurors",
+      "url": "https://www.nbcboston.com/news/local/lindsay-clancy-jurors-speak-about-deliberations-hold-out-juror/4011580/",
+      "snapshot_id": "4bc1735b-0164-4c06-989d-bd2da563f5cc",
+      "http_status": 200
+    },
+    {
+      "id": "src-bostoncom-civil",
+      "url": "https://www.boston.com/news/crime/2026/09/10/lindsay-clancy-patrick-clancy-civil-lawsuits/",
+      "snapshot_id": "770dad4a-f592-45a3-a4b6-307e4a589ae7",
+      "http_status": 200
+    },
+    {
+      "id": "src-nbc-bifurcation",
+      "url": "https://www.nbcboston.com/news/local/lindsay-clancy-murder-case-judge-issues-key-ruling/3925435/",
+      "snapshot_id": "e22b1760-86f9-43c9-a159-4a83679b14a8",
+      "http_status": 200
+    },
+    {
+      "id": "src-kutv",
+      "url": "https://kutv.com/news/nation-world/lindsay-clancy-due-back-in-court-as-question-of-retrial-remains-unanswered-sept-29-2026",
+      "snapshot_id": "12b78265-eec9-46ad-aca8-0df9268d5d22",
+      "http_status": 200
+    }
+  ],
+  "logByAgent": {
+    "scoper": {
+      "query": 2,
+      "open": 3,
+      "claim": 16,
+      "note": 1
+    },
+    "researcher": {
+      "query": 12,
+      "open": 20,
+      "claim": 37,
+      "note": 4
+    },
+    "records_researcher": {
+      "query": 12,
+      "open": 22,
+      "claim": 32,
+      "note": 2
+    },
+    "drafter": {
+      "note": 3
+    },
+    "red_team": {
+      "note": 6
+    },
+    "hard_questions": {
+      "note": 3
+    },
+    "fact_checker": {
+      "note": 3
+    },
+    "pipeline": {
+      "note": 5
+    },
+    "editor": {
+      "note": 1
+    }
+  },
+  "logByScope": {
+    "scoper": {
+      "query": 2,
+      "open": 3,
+      "claim": 16,
+      "note": 1
+    },
+    "researcher#criminally-responsible": {
+      "query": 6,
+      "open": 9,
+      "claim": 18,
+      "note": 2
+    },
+    "records_researcher#records": {
+      "query": 12,
+      "open": 22,
+      "claim": 32,
+      "note": 2
+    },
+    "researcher#lacked-criminal-responsibility": {
+      "query": 6,
+      "open": 11,
+      "claim": 19,
+      "note": 2
+    }
+  }
+}

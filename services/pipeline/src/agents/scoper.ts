@@ -98,11 +98,43 @@ const scoper: AgentSpec<ScoperInput, ScoperOutput> = {
 
 export default scoper;
 
+export interface OutlineFromCaseOptions {
+  /** A revision: the admin's notes, which the draft must carry out. */
+  instructions?: string;
+  /** A live update: the live version's as-of date; the draft must report what is new since then. */
+  sinceAsOf?: string;
+}
+
+const clipText = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+
 /**
  * An outline for a case that already exists (revisions and live updates skip
- * the scoper): its question, sides, open questions and content warning.
+ * the scoper): its question, sides and content warning, and a must-answer list
+ * for this run.
+ *
+ * The must-answer list is NOT the base version's open questions: those are
+ * unknowns by design, and asking the hard-questions agent to see them answered
+ * would block every revision for all three rounds. It is, in order: the admin's
+ * notes (revision) or the developments since the live as-of date (update), then
+ * the must-answer items the base version's own run answered (its hard questions
+ * that belong to no side), and at least the case question itself. The open
+ * questions go to `notes` so the drafter keeps them unless a new source answers one.
  */
-export function outlineFromCase(c: Case | CaseInput): Outline {
+export function outlineFromCase(c: Case | CaseInput, opts: OutlineFromCaseOptions = {}): Outline {
+  const must: string[] = [];
+  const add = (q: string) => {
+    const text = clipText(q.trim(), 400);
+    if (text && must.length < 12 && !must.includes(text)) must.push(text);
+  };
+  const notes = opts.instructions?.trim();
+  if (notes) add(`Does the draft carry out the admin's notes for this revision: "${notes}"?`);
+  if (opts.sinceAsOf) add(`What has happened since ${opts.sinceAsOf} that bears on the question, and does the draft report each material development with its date?`);
+  for (const q of c.review?.hard_questions ?? []) {
+    if (!q.side_id && q.status === 'answered') add(q.question);
+  }
+  if (must.length === 0) add(`Does the draft set out the facts each side relies on to answer: ${c.question.prompt}`);
+
+  const open = c.open_questions ?? [];
   return {
     slug: c.slug,
     title: c.title,
@@ -112,9 +144,15 @@ export function outlineFromCase(c: Case | CaseInput): Outline {
       right_label: c.question.scale.right_label,
     },
     sides: c.sides.map((s) => ({ id: s.id, label: s.label, position: s.steelman.slice(0, 600) })),
-    must_answer: c.open_questions?.length ? c.open_questions.slice(0, 15) : [c.question.prompt],
+    must_answer: must,
     content_warning: c.content_warning ?? null,
     timeline: [],
-    notes: '',
+    notes: open.length
+      ? clipText(
+          `Version ${c.version} (as of ${c.as_of}) lists these open questions, unknown when it was written. Keep each in open_questions ` +
+            `unless a source opened in this run answers it; they are not gaps to close: ${open.map((q) => `"${q}"`).join('; ')}`,
+          2000,
+        )
+      : '',
   };
 }

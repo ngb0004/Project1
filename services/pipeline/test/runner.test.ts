@@ -6,7 +6,7 @@ import type { AgentContext, AgentSpec } from '../src/agents/types';
 import { ResearchTools } from '../src/research/tools';
 import { ClaudeAgentRunner, DEFAULT_MODELS, outputJsonSchema } from '../src/runner/claude';
 import { FakeRunner } from '../src/runner/fake';
-import { AgentRunError } from '../src/runner/types';
+import { AgentRunError, isServiceUnavailable } from '../src/runner/types';
 import { AGENT_STANDARDS, STANDARD_RULES, UNTRUSTED_DATA_RULE } from '../src/standards';
 import { memoryStore } from './helpers';
 
@@ -160,6 +160,24 @@ describe('ClaudeAgentRunner.run', () => {
     const err = await runner.run(tinySpec, { q: 'x' }, ctx, toolsFor(tinySpec as AgentSpec<never, unknown>)).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AgentRunError);
     expect(err).toMatchObject({ reason: 'budget', costUsd: 0.7, agent: 'hard_questions' });
+  });
+
+  it('marks a refused account (usage limit, auth) as unavailable, and other failures as execution errors', async () => {
+    const throwing = (message: string) =>
+      ((() =>
+        (async function* () {
+          yield* [];
+          throw new Error(message);
+        })()) as unknown as typeof query);
+    const tools = () => toolsFor(tinySpec as AgentSpec<never, unknown>);
+    const limit = await new ClaudeAgentRunner({ queryFn: throwing("You've hit your session limit · resets 3:10am (UTC)") }).run(tinySpec, { q: 'x' }, ctx, tools()).catch((e: unknown) => e);
+    expect(limit).toMatchObject({ name: 'AgentRunError', reason: 'unavailable' });
+    const crash = await new ClaudeAgentRunner({ queryFn: throwing('socket hang up') }).run(tinySpec, { q: 'x' }, ctx, tools()).catch((e: unknown) => e);
+    expect(crash).toMatchObject({ reason: 'execution' });
+    const { fn } = fakeQuery([{ type: 'result', subtype: 'success', is_error: true, num_turns: 1, total_cost_usd: 0, result: 'Invalid API key · Please run /login' }]);
+    const auth = await new ClaudeAgentRunner({ queryFn: fn }).run(tinySpec, { q: 'x' }, ctx, tools()).catch((e: unknown) => e);
+    expect(auth).toMatchObject({ reason: 'unavailable' });
+    expect(isServiceUnavailable('The fact-checker found a rate limit of 30 mph in the source')).toBe(false);
   });
 
   it('rejects structured output that does not match the schema', async () => {

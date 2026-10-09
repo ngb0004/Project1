@@ -4,7 +4,7 @@ import type { AgentContext, AgentSpec } from '../agents/types';
 import type { ResearchTools } from '../research/tools';
 import { MCP_SERVER_NAME } from '../research/tools';
 import { AGENT_STANDARDS } from '../standards';
-import { AgentRunError, type AgentRunResult, type AgentRunner, type RunOptions } from './types';
+import { AgentRunError, isServiceUnavailable, type AgentFailureReason, type AgentRunResult, type AgentRunner, type RunOptions } from './types';
 
 /**
  * Runs agents with the Claude Agent SDK. Each call is a fresh query with no
@@ -22,10 +22,16 @@ export const DEFAULT_MODELS = {
 /**
  * Per-call spend caps by tier (USD). The orchestrator's share of the run budget
  * can lower a call's cap further; it never raises it above these.
+ *
+ * Measured on two live Clancy runs (43 calls, Oct 2026): the most expensive
+ * strong-tier calls were the drafter ($2.47), the fact-checker ($1.74) and the
+ * editor ($1.24); fast-tier researchers peaked at $0.57. The caps leave about
+ * 2.5x (strong) and 3.5x (fast) headroom for larger cases while still stopping
+ * a runaway call. A full three-round run cost $18.20 (budget default: $40).
  */
 export const DEFAULT_CALL_BUDGET_USD = {
-  strong: 8,
-  fast: 4,
+  strong: 6,
+  fast: 2,
 } as const;
 
 export interface ClaudeRunnerOptions {
@@ -109,11 +115,22 @@ export class ClaudeAgentRunner implements AgentRunner {
         if (msg.type !== 'result') continue;
         cost = msg.total_cost_usd ?? 0;
         if (msg.subtype !== 'success') {
-          const reason =
-            msg.subtype === 'error_max_budget_usd' ? 'budget' : msg.subtype === 'error_max_turns' ? 'max_turns' : msg.subtype === 'error_max_structured_output_retries' ? 'output' : 'execution';
-          throw new AgentRunError(`${spec.name} stopped: ${msg.subtype}${msg.errors?.length ? ` (${msg.errors.join('; ')})` : ''}`, spec.name, cost, reason);
+          const detail = msg.errors?.length ? ` (${msg.errors.join('; ')})` : '';
+          const reason: AgentFailureReason =
+            msg.subtype === 'error_max_budget_usd'
+              ? 'budget'
+              : msg.subtype === 'error_max_turns'
+                ? 'max_turns'
+                : msg.subtype === 'error_max_structured_output_retries'
+                  ? 'output'
+                  : isServiceUnavailable(detail)
+                    ? 'unavailable'
+                    : 'execution';
+          throw new AgentRunError(`${spec.name} stopped: ${msg.subtype}${detail}`, spec.name, cost, reason);
         }
-        if (msg.is_error) throw new AgentRunError(`${spec.name} failed: ${msg.result}`, spec.name, cost);
+        if (msg.is_error) {
+          throw new AgentRunError(`${spec.name} failed: ${msg.result}`, spec.name, cost, isServiceUnavailable(msg.result) ? 'unavailable' : 'execution');
+        }
         if (msg.structured_output === undefined) {
           throw new AgentRunError(`${spec.name} returned no structured output`, spec.name, cost, 'output');
         }
@@ -126,8 +143,9 @@ export class ClaudeAgentRunner implements AgentRunner {
       throw new AgentRunError(`${spec.name} ended without a result`, spec.name, cost);
     } catch (e) {
       if (e instanceof AgentRunError) throw e;
-      const aborted = abort.signal.aborted;
-      throw new AgentRunError(`${spec.name} failed: ${(e as Error).message}`, spec.name, cost, aborted ? 'aborted' : 'execution');
+      const message = (e as Error).message;
+      const reason: AgentFailureReason = abort.signal.aborted ? 'aborted' : isServiceUnavailable(message) ? 'unavailable' : 'execution';
+      throw new AgentRunError(`${spec.name} failed: ${message}`, spec.name, cost, reason);
     } finally {
       clearTimeout(timer);
       runOpts.signal?.removeEventListener('abort', onOuterAbort);

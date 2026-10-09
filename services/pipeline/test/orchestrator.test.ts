@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { assertValidCase, validateCase, type Case } from '@sia/case-schema';
 import { checkCitations } from '../src/factcheck';
-import { runCasePipeline, type PipelinePackage, type PipelineResult } from '../src/orchestrator';
+import { ServiceUnavailableError, runCasePipeline, type PipelinePackage, type PipelineResult } from '../src/orchestrator';
 import { FakeRunner, type FakeScript } from '../src/runner/fake';
 import { AgentRunError } from '../src/runner/types';
 import { AGENT_STANDARDS } from '../src/standards';
@@ -20,6 +20,7 @@ import {
   editorScript,
   highFlagRedTeam,
   memoryStore,
+  outline,
   researcherScript,
 } from './helpers';
 
@@ -317,6 +318,37 @@ describe('runCasePipeline (new case)', () => {
     expect(pkg.review.open_issues).toEqual([expect.objectContaining({ source: 'pipeline', description: expect.stringMatching(/council-not-responsible.*error_max_turns.*1 claim/) })]);
   });
 
+  it('stops before research when the scoper could not open a single usable page for the brief', async () => {
+    const runner = new FakeRunner(
+      cleanScripts({
+        scoper: async (_input: unknown, _ctx: unknown, tools: { logQuery: (q: string) => Promise<void> }) => {
+          await tools.logQuery('a case nobody has reported on');
+          return outline();
+        },
+      }),
+    );
+    const { store, log } = memoryStore();
+    const err = await runCasePipeline({ kind: 'new_case', brief: 'A made-up controversy' }, { runner, store, runId: 'unknown', asOf: AS_OF }).catch((e: unknown) => e);
+    expect((err as Error).message).toMatch(/brief could not be identified: the scoper opened no usable source/);
+    expect(runner.callsTo('researcher')).toHaveLength(0);
+    expect(log.entries.some((e) => e.agent === 'pipeline' && e.excerpt?.includes('opened no usable source'))).toBe(true);
+  });
+
+  it('stops the run, with no package, when the model service refuses the account mid-run', async () => {
+    const limit = () => {
+      throw new AgentRunError("fact_checker failed: You've hit your session limit · resets 3:10am (UTC)", 'fact_checker', 0, 'unavailable');
+    };
+    const runner = new FakeRunner(cleanScripts({ fact_checker: limit }));
+    const { store } = memoryStore();
+    const err = await runCasePipeline({ kind: 'new_case', brief: BRIEF }, { runner, store, runId: 'limit', asOf: AS_OF }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ServiceUnavailableError);
+    expect((err as Error).message).toMatch(/model service is unavailable \(fact_checker, round 1\).*session limit/);
+    // Not retried, and nothing after it ran: no revision and no editor pass on a half-checked draft.
+    expect(runner.callsTo('fact_checker')).toHaveLength(1);
+    expect(runner.callsTo('drafter')).toHaveLength(1);
+    expect(runner.callsTo('editor')).toHaveLength(0);
+  });
+
   it('does not start a round the budget cannot cover, and keeps a reserve so the editor still runs', async () => {
     // $1 a call on a $12 budget ($1.20 kept for the editor): scoper, 3 researchers and the drafter cost $5, round 1's
     // four critics $4. Another round would cost about $6 (a redraft plus the critics) with $1.80 left, so the loop stops.
@@ -369,6 +401,10 @@ describe('runCasePipeline (revisions and updates)', () => {
     const draft = runner.callsTo('drafter', { round: 0 })[0]!.input as { instructions?: string; base?: unknown };
     expect(draft.instructions).toBe('Say who chairs the council.');
     expect(draft.base).toBeDefined();
+    // The critics check the admin's notes; the base version's open questions are not must-answer items.
+    const hq = runner.callsTo('hard_questions', { round: 1 })[0]!.input as { must_answer: string[] };
+    expect(hq.must_answer[0]).toContain('Say who chairs the council.');
+    for (const q of base.open_questions) expect(hq.must_answer.some((m) => m.includes(q))).toBe(false);
   });
 
   it('an update with nothing new after the live as_of returns no_changes', async () => {

@@ -24,16 +24,17 @@
 import { realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { signInStaff } from '@sia/case-store';
 import { runCasePipeline, toLocalId } from './orchestrator';
 import { checkSavedPackage, manifestOf, writeAuditDir, writePackageToDir } from './package';
 import { FileResearchLog } from './research/log';
 import { SourceStore } from './research/store';
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeAgentRunner } from './runner/claude';
 import { verifyJob } from './verify';
 import { runWorker } from './worker';
 
+/** Spend cap per run. A measured three-round run on a two-side case cost $18.20; three sides add a researcher and a red team per round. */
 export const DEFAULT_RUN_BUDGET_USD = 40;
 /** Offline runs land here by default (git-ignored). */
 export const DEFAULT_RUNS_DIR = resolve(import.meta.dirname, '..', '.runs');

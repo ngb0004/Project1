@@ -142,6 +142,18 @@ export class PipelineError extends Error {
   }
 }
 
+/**
+ * The model service refused the account (usage or rate limit, authentication).
+ * Every later call would fail the same way, so the run stops at once rather
+ * than submit a package whose critics, revisions or editor never ran.
+ */
+export class ServiceUnavailableError extends PipelineError {
+  constructor(message: string, costUsd = 0) {
+    super(message, costUsd);
+    this.name = 'ServiceUnavailableError';
+  }
+}
+
 export class BudgetExhaustedError extends Error {
   constructor(spent: number, budget: number) {
     super(`the run budget of $${budget.toFixed(2)} is used up ($${spent.toFixed(2)} spent)`);
@@ -329,6 +341,9 @@ class PipelineRun {
         this.cost += e instanceof AgentRunError ? e.costUsd : 0;
         await tools.note(`Agent call failed: ${label}, attempt ${attempt}: ${err.message}`).catch(() => {});
         this.progress(`${label}: failed (${err.message})`);
+        if (e instanceof AgentRunError && e.reason === 'unavailable') {
+          throw new ServiceUnavailableError(`the model service is unavailable (${label}): ${err.message}`, this.cost);
+        }
         const retryable = e instanceof AgentRunError && (e.reason === 'output' || e.reason === 'execution');
         if (attempt >= 2 || !retryable || this.deps.signal?.aborted) throw e;
         continue;
@@ -347,6 +362,8 @@ class PipelineRun {
           `${tools.queries.length} searches, ${tools.opens.length} pages opened (${tools.opens.filter((o) => o.ok).length} usable), ` +
           `${tools.reads.size} snapshots read, ${tools.claims.length} claims logged. ${summary}`,
       );
+      // Which stored pages a reading agent (drafter, red team, fact-checker) went back to, for the audit trail.
+      if (tools.reads.size) await tools.note(`Snapshots read by ${label}: ${[...tools.reads].join(', ')}.`);
       this.progress(`${label}: done ($${r.costUsd.toFixed(2)}, ${r.turns} turns)`);
       return r.output;
     }
@@ -383,7 +400,7 @@ class PipelineRun {
       if (r.status === 'rejected') {
         failures++;
         const msg = (r.reason as Error).message;
-        if (r.reason instanceof BudgetExhaustedError) throw r.reason;
+        if (r.reason instanceof BudgetExhaustedError || r.reason instanceof PipelineError) throw r.reason;
         const salvaged = this.salvageClaims(toolsOf.get(i), scope, round);
         this.issues.push({
           source: 'pipeline',
@@ -575,7 +592,7 @@ class PipelineRun {
       try {
         return await p;
       } catch (e) {
-        if (e instanceof BudgetExhaustedError) throw e;
+        if (e instanceof BudgetExhaustedError || e instanceof PipelineError) throw e;
         failed.push(`${name}: ${(e as Error).message}`);
         return undefined;
       }
@@ -729,9 +746,18 @@ class PipelineRun {
           `Question: ${o.question.prompt} Sides: ${o.sides.map((s) => s.label).join(' / ')}. ${o.must_answer.length} must-answer items; ` +
           `content warning: ${o.content_warning ?? 'none'}.`,
       });
+      // A scoper that could not open one usable page could not identify the case: the researchers would only
+      // spend the budget guessing. Stop here and say so.
+      if (this.store.opened().length === 0) {
+        await this.note('The scoper opened no usable source, so the brief could not be tied to a public case; stopping before research.', 0);
+        throw new PipelineError(
+          `the brief could not be identified: the scoper opened no usable source (its outline: "${clip(this.outline.title, 160)}")`,
+          this.cost,
+        );
+      }
     } else {
       this.base = request.kind === 'revision' ? request.base : request.live;
-      this.outline = outlineFromCase(this.base);
+      this.outline = outlineFromCase(this.base, request.kind === 'revision' ? { instructions: request.instructions } : { sinceAsOf: request.live.as_of });
     }
 
     // 2. Research: one researcher per side plus the records researcher, in parallel.
@@ -858,7 +884,7 @@ class PipelineRun {
         draft = this.prepare(revised.case);
         if (this.validation(draft).ok) lastValid = draft;
       } catch (e) {
-        if (this.deps.signal?.aborted) throw e;
+        if (this.deps.signal?.aborted || e instanceof PipelineError) throw e;
         if (e instanceof BudgetExhaustedError) {
           budgetStop = true;
           await this.note(`Stopped in round ${round}: ${e.message}.`, round);
@@ -938,7 +964,8 @@ class PipelineRun {
 
     // 6. Review record and package.
     const finalFailures = checkCitations(final, this.store);
-    const review = this.assembleReview(final, rounds, questions, clean, finalFailures);
+    // Only the editor's own version gets the "edited after the finding" note; a fallback is not the editor's text.
+    const review = this.assembleReview(final, rounds, questions, clean, finalFailures, editorFallback ? final : draft);
     const doc = { ...final, status: 'in_review' as const, review };
     const checked = validateCase(doc);
     if (!checked.ok || !checked.case) {
@@ -1032,7 +1059,15 @@ class PipelineRun {
     return out;
   }
 
-  private assembleReview(final: DraftCase, rounds: RoundCritique[], questions: Map<string, QuestionRecord>, clean: boolean, finalFailures: CitationFailure[]): ReviewRecord {
+  private assembleReview(
+    final: DraftCase,
+    rounds: RoundCritique[],
+    questions: Map<string, QuestionRecord>,
+    clean: boolean,
+    finalFailures: CitationFailure[],
+    /** The last critiqued draft, before the editor's pass. */
+    critiqued: DraftCase,
+  ): ReviewRecord {
     const sideIds = new Set(final.sides.map((s) => s.id));
     const last = rounds[rounds.length - 1];
 
@@ -1094,6 +1129,16 @@ class PipelineRun {
       seen.add(description);
       const step = stepIdOf(f.target, final);
       open.push({ source: 'fact_checker', severity: 'high', description, ...(step ? { step_id: step } : {}), resolved: false });
+    }
+
+    // The critics saw the draft before the editor's pass. When the editor then changed a flagged step, say so:
+    // the finding may already be fixed (or made worse), and no critic has checked the edited text.
+    const before = new Map(critiqued.steps.map((st) => [st.id, JSON.stringify({ ...st, order: 0 })]));
+    const editedSteps = new Set(final.steps.filter((st) => before.get(st.id) !== JSON.stringify({ ...st, order: 0 })).map((st) => st.id));
+    for (const o of open) {
+      if (o.step_id && editedSteps.has(o.step_id) && o.source !== 'editor' && o.source !== 'pipeline' && !o.description.startsWith('Citation check')) {
+        o.description = clip(`${o.description} The editor revised this step after this finding; no critic re-checked the edited text.`, 2000);
+      }
     }
 
     const parsed = CaseSchema.parse({ ...final, review: undefined });

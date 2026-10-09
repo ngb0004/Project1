@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { validateCase, type Case, type Issue } from '@sia/case-schema';
 import {
   getPipelineJob,
@@ -177,6 +178,10 @@ export async function verifyJob(db: Db, jobId: string): Promise<JobAudit> {
   }
 
   // Research log: every opened page has its snapshot; every research agent searched, opened and logged claims; every agent ran.
+  // The snapshots are what the citation check above read: each stored text must still hash to its sha256.
+  const tampered = snapshots.filter((x) => createHash('sha256').update(x.text_content).digest('hex') !== x.sha256);
+  check('every snapshot matches its sha256', tampered.length === 0, `${snapshots.length - tampered.length}/${snapshots.length}${tampered.length ? `; mismatched: ${tampered.map((x) => x.id).join(', ')}` : ''}`);
+
   const snapIds = new Set(metas.map((m) => m.id));
   const opens = logRows.filter((x) => x.kind === 'open');
   const orphanOpens = opens.filter((x) => x.snapshot_id && !snapIds.has(x.snapshot_id));

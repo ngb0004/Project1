@@ -572,12 +572,15 @@ describe('the orchestrator with a planted claim (real fetch, scripted agents)', 
   });
 
   it('variant misused_quote: an "unsupported" row from the fact-checker blocks the loop and becomes a high open issue', async () => {
-    const { pkg, runner } = await runPipeline(
+    const { pkg, runner, log, store } = await runPipeline(
       scripts({
         variant: 'misused_quote',
         factChecker: judgingFactChecker({ verdict: 'unsupported', note: 'The minutes record a 5-4 vote to postpone, not a unanimous vote to cancel.', confidence_after: 'disputed' }),
       }),
     );
+    // The research log records which snapshots the fact-checker went back to, the minutes among them.
+    const reads = log.entries.find((e) => e.agent === 'fact_checker' && e.round === 1 && e.excerpt?.startsWith('Snapshots read by fact_checker'));
+    expect(reads?.excerpt).toContain(store.findByUrl(url(P.minutes))!.id);
     expect(pkg.clean).toBe(false);
     expect(pkg.rounds).toBe(3);
     expect(pkg.review.open_issues).toContainEqual(
@@ -585,6 +588,23 @@ describe('the orchestrator with a planted claim (real fetch, scripted agents)', 
     );
     // The fact-checker re-read the cited snapshots through its tools.
     expect(runner.callsTo('fact_checker').every((c) => c.access === 'read_sources')).toBe(true);
+  });
+
+  it('variant misused_quote: when the editor changes the flagged step after the last round, the open issue says no critic re-checked it', async () => {
+    const unsupported = judgingFactChecker({ verdict: 'unsupported', note: 'The minutes record a 5-4 vote to postpone, not a unanimous vote to cancel.' });
+    const { pkg } = await runPipeline({
+      ...scripts({ variant: 'misused_quote', factChecker: unsupported }),
+      editor: editorScript((d) => {
+        const st = d.steps.find((x) => x.id === PLANTED)!;
+        st.headline = 'The council voted 5-4 to postpone the Elm Street replacement project.';
+        return d;
+      }),
+    });
+    const issue = pkg.review.open_issues.find((o) => o.step_id === PLANTED && o.source === 'fact_checker');
+    expect(issue?.description).toMatch(/unsupported.*The editor revised this step after this finding; no critic re-checked the edited text\./);
+    // Steps the editor left alone carry no such note.
+    const { pkg: untouched } = await runPipeline(scripts({ variant: 'misused_quote', factChecker: unsupported }));
+    expect(untouched.review.open_issues.some((o) => o.description.includes('editor revised'))).toBe(false);
   });
 
   it('variant misused_quote: "partially supported" downgrades the step and still reaches the admin', async () => {
@@ -601,7 +621,7 @@ describe('the orchestrator with a planted claim (real fetch, scripted agents)', 
 });
 
 // ---------------------------------------------------------------------------
-// 3. Live: the real fact-checker agent (PIPELINE_LIVE=1; about $0.5 to $2)
+// 3. Live: the real fact-checker agent (PIPELINE_LIVE=1; about $0.40 for the three tests, measured)
 // ---------------------------------------------------------------------------
 
 const live = process.env.PIPELINE_LIVE === '1';

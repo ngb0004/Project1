@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminCreateCase, adminPublish, adminSetUpdateCadence, type Db } from '@sia/case-store';
-import { anonClient, pool, sql, submitFixture, userClient } from './helpers';
+import { anonClient, clearJobQueue, pool, sql, submitFixture, userClient, withQueueLock } from './helpers';
 
 let admin: Db;
 let pipeline: Db;
@@ -11,18 +11,21 @@ const anon = anonClient();
 beforeAll(async () => {
   [admin, pipeline, plainUser] = await Promise.all([userClient('admin'), userClient('pipeline'), userClient('none')]);
   // Leave no queued jobs from earlier files in the way of claim order.
-  await sql(`update public.pipeline_jobs set status = 'cancelled' where status in ('queued', 'running')`);
+  await clearJobQueue();
 });
 afterAll(() => pool.end());
 
 describe('pipeline jobs', () => {
   it('a brief becomes a queued job that only the pipeline can claim and finish', async () => {
-    const jobId = await adminCreateCase(admin, 'Lindsay Clancy trial verdict');
-    for (const client of [admin, anon, plainUser]) {
-      const r = await client.rpc('pipeline_claim_job', { p_worker: 'x' });
-      expect(r.error).not.toBeNull();
-    }
-    const claim = await pipeline.rpc('pipeline_claim_job', { p_worker: 'worker-1' });
+    // Under the queue lock, so a suite running beside this one cannot claim or cancel the job first.
+    const { jobId, claim } = await withQueueLock(async () => {
+      const jobId = await adminCreateCase(admin, 'Lindsay Clancy trial verdict');
+      for (const client of [admin, anon, plainUser]) {
+        const r = await client.rpc('pipeline_claim_job', { p_worker: 'x' });
+        expect(r.error).not.toBeNull();
+      }
+      return { jobId, claim: await pipeline.rpc('pipeline_claim_job', { p_worker: 'worker-1' }) };
+    });
     expect(claim.error).toBeNull();
     expect(claim.data[0]).toMatchObject({ id: jobId, kind: 'new_case', status: 'running', brief: 'Lindsay Clancy trial verdict', attempts: 1 });
 

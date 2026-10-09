@@ -35,6 +35,43 @@ export async function sql<T = any>(text: string, params: unknown[] = []): Promis
   return r.rows as T[];
 }
 
+/** Advisory lock key for the shared pipeline job queue. */
+export const QUEUE_LOCK_KEY = 46_200_001;
+
+/**
+ * Serializes work on the pipeline job queue between test suites that share this
+ * database (these tests and the pipeline worker tests in services/pipeline, which
+ * may run in parallel under `pnpm -r test`). Hold it from queuing a job until it
+ * is claimed, and around queue cleanup, so no other suite claims or cancels a job
+ * in between.
+ */
+export async function withQueueLock<T>(fn: () => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('select pg_advisory_lock($1)', [QUEUE_LOCK_KEY]);
+    try {
+      return await fn();
+    } finally {
+      await client.query('select pg_advisory_unlock($1)', [QUEUE_LOCK_KEY]);
+    }
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Cancels queued jobs and stale running ones (left by earlier files or runs). A
+ * job another suite's worker is running right now (fresh heartbeat) is left alone.
+ */
+export async function clearJobQueue() {
+  await withQueueLock(() =>
+    sql(
+      `update public.pipeline_jobs set status = 'cancelled'
+        where status = 'queued' or (status = 'running' and heartbeat_at < now() - interval '30 minutes')`,
+    ),
+  );
+}
+
 export function serviceClient(): SupabaseClient {
   return createClient(API_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
 }

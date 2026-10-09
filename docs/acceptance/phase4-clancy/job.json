@@ -1,0 +1,29 @@
+{
+  "id": "8e1a66df-56cc-42a3-8568-23dabdf386a0",
+  "kind": "new_case",
+  "case_id": null,
+  "base_version": null,
+  "brief": "Lindsay Clancy trial verdict",
+  "instructions": null,
+  "status": "succeeded",
+  "attempts": 1,
+  "claimed_by": "vm:5261",
+  "claimed_at": "2026-10-09T03:17:04.124959+00:00",
+  "heartbeat_at": "2026-10-09T03:58:04.552193+00:00",
+  "finished_at": "2026-10-09T03:58:56.763498+00:00",
+  "result": {
+    "slug": "lindsay-clancy-trial-mistrial-and-criminal-responsibility",
+    "clean": false,
+    "rounds": 3,
+    "case_id": "ec738a33-f3dd-42a0-9a40-927bd2a04f27",
+    "version": 1,
+    "cost_usd": 18.1979,
+    "open_issues": 2,
+    "sources_opened": 29,
+    "editor_fallback": false,
+    "research_log_rows": 184
+  },
+  "error": null,
+  "created_at": "2026-10-09T03:16:57.788723+00:00",
+  "created_by": "admin-live@sia.local"
+}

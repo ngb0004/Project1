@@ -11,14 +11,14 @@ import { ClaudeAgentRunner } from '../src/runner/claude';
 import { AGENT_STANDARDS } from '../src/standards';
 
 /**
- * One real Agent SDK call (opt-in: PIPELINE_LIVE_TEST=1, about $0.05-0.30).
+ * One real Agent SDK call (opt-in: PIPELINE_LIVE=1, or the older PIPELINE_LIVE_TEST=1; about $0.05-0.30).
  * It proves the wiring the scripted tests cannot: web search runs and is logged
  * by the PostToolUse hook, the in-process MCP tools open and snapshot a real
  * page and log a claim, and the answer comes back as schema-checked structured
  * output.
  */
 
-const live = !!process.env.PIPELINE_LIVE_TEST;
+const live = process.env.PIPELINE_LIVE === '1' || !!process.env.PIPELINE_LIVE_TEST;
 
 const probe: AgentSpec<{ topic: string }, { url: string; snapshot_id: string; quote: string }> = {
   name: 'researcher',

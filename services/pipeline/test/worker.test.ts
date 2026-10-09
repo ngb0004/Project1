@@ -12,11 +12,12 @@ import {
   listStaffVersions,
   researchLogOpenedUrls,
   type Db,
+  type PipelineJobRow,
 } from '@sia/case-store';
 // The local stack's test helpers provision the admin and pipeline accounts (the
 // way supabase/scripts/create-staff-user.ts does). The worker itself only ever
 // receives the signed-in pipeline client.
-import { ANON_KEY, API_URL, pool, sql, userClient } from '../../../supabase/tests/helpers';
+import { ANON_KEY, API_URL, pool, sql, userClient, withQueueLock } from '../../../supabase/tests/helpers';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,7 +27,7 @@ import { MemoryResearchLog } from '../src/research/log';
 import { SourceStore } from '../src/research/store';
 import { FakeRunner, type FakeScript } from '../src/runner/fake';
 import { verifyJob } from '../src/verify';
-import { runWorkerOnce } from '../src/worker';
+import { claimNextJob, runWorkerOnce } from '../src/worker';
 import { AS_OF, SIDE_A, SIDE_B, URLS, cleanScripts, fakeFetcher, researcherScript, scoperScript } from './helpers';
 
 const reachable = await fetch(`${API_URL}/rest/v1/`, { headers: { apikey: ANON_KEY } })
@@ -43,6 +44,17 @@ const quietResearch: Record<string, FakeScript> = {
   records_researcher: researcherScript([]),
 };
 
+describe('claimNextJob', () => {
+  it('claims through pipeline_claim_job as the signed-in account and returns the job, or null for an empty queue', async () => {
+    const calls: unknown[][] = [];
+    const db = (rows: unknown[] | null) =>
+      ({ rpc: async (...args: unknown[]) => (calls.push(args), { data: rows, error: null }) }) as unknown as Db;
+    expect(await claimNextJob(db([{ id: 'j1' }]), 'w-1')).toEqual({ id: 'j1' });
+    expect(await claimNextJob(db([]), 'w-1')).toBeNull();
+    expect(calls[0]).toEqual(['pipeline_claim_job', { p_worker: 'w-1' }]);
+  });
+});
+
 describe.skipIf(!reachable)('pipeline worker against the local Supabase stack', () => {
   let admin: Db;
   let pipeline: Db;
@@ -50,30 +62,54 @@ describe.skipIf(!reachable)('pipeline worker against the local Supabase stack', 
   let firstVersion: number;
   const slug = `maple-water-${randomUUID().slice(0, 8)}`;
 
-  const work = (scripts: Record<string, FakeScript>) =>
-    runWorkerOnce({ db: pipeline, runner: new FakeRunner(scripts), fetcher: fakeFetcher(), asOf: AS_OF, workerId: 'vitest-worker', heartbeatMs: 25 });
+  /**
+   * Queues a job as the admin and claims exactly that job for this worker. The
+   * queue is shared with the supabase tests (they may run in parallel), so this
+   * suite never claims "the oldest queued job" and never cancels other jobs: it
+   * claims its own job by id, under the queue lock the supabase tests also take,
+   * the way pipeline_claim_job would (running, claimed_by, heartbeat, attempts).
+   */
+  const queue = (create: () => Promise<string>): Promise<PipelineJobRow> =>
+    withQueueLock(async () => {
+      const id = await create();
+      const [job] = await sql<PipelineJobRow>(
+        `update public.pipeline_jobs
+            set status = 'running', claimed_by = 'vitest-worker', claimed_at = now(), heartbeat_at = now(), attempts = attempts + 1
+          where id = $1 and status = 'queued'
+          returning *`,
+        [id],
+      );
+      if (!job) throw new Error(`job ${id} is not queued`);
+      return job;
+    });
+
+  const work = (job: PipelineJobRow | null, scripts: Record<string, FakeScript>) =>
+    runWorkerOnce({
+      db: pipeline,
+      runner: new FakeRunner(scripts),
+      claim: async () => job,
+      fetcher: fakeFetcher(),
+      asOf: AS_OF,
+      workerId: 'vitest-worker',
+      heartbeatMs: 25,
+    });
 
   beforeAll(async () => {
     [admin, pipeline] = await Promise.all([userClient('admin'), userClient('pipeline')]);
-    // The worker claims the oldest queued job (or a stale running one): leave none from other test files in the
-    // way. A job another worker is running right now (fresh heartbeat) is left alone.
-    await sql(
-      `update public.pipeline_jobs set status = 'cancelled'
-        where status = 'queued' or (status = 'running' and heartbeat_at < now() - interval '30 minutes')`,
-    );
   });
   afterAll(() => pool.end());
 
-  it('claims an admin-created job, runs it and lands the package in review with its research log and snapshots', async () => {
-    const jobId = await adminCreateCase(admin, 'Maple County water main break');
-    const outcome = await work(cleanScripts({ scoper: scoperScript(slug) }));
+  it('runs an admin-created job and lands the package in review with its research log and snapshots', async () => {
+    const job = await queue(() => adminCreateCase(admin, 'Maple County water main break'));
+    const jobId = job.id;
+    const outcome = await work(job, cleanScripts({ scoper: scoperScript(slug) }));
     expect(outcome).toMatchObject({ jobId, kind: 'new_case', status: 'succeeded' });
 
-    const job = await getPipelineJob(admin, jobId);
-    expect(job).toMatchObject({ status: 'succeeded', claimed_by: 'vitest-worker', attempts: 1, error: null });
-    expect(job!.result).toMatchObject({ slug, rounds: 1, clean: true, open_issues: 0 });
-    caseId = job!.result!.case_id as string;
-    firstVersion = job!.result!.version as number;
+    const finished = await getPipelineJob(admin, jobId);
+    expect(finished).toMatchObject({ status: 'succeeded', claimed_by: 'vitest-worker', attempts: 1, error: null });
+    expect(finished!.result).toMatchObject({ slug, rounds: 1, clean: true, open_issues: 0 });
+    caseId = finished!.result!.case_id as string;
+    firstVersion = finished!.result!.version as number;
 
     const [v] = await listStaffVersions(admin, caseId);
     expect(v).toMatchObject({ status: 'in_review', origin: 'pipeline', version: firstVersion, pipeline_job_id: jobId, tags: ['new_case'], slug });
@@ -123,8 +159,9 @@ describe.skipIf(!reachable)('pipeline worker against the local Supabase stack', 
   });
 
   it('runs a revision from the admin\'s notes against that version and supersedes it', async () => {
-    const { job_id } = await adminRequestChanges(admin, caseId, firstVersion, 'Name the council chair in step 1.');
-    const outcome = await work(cleanScripts(quietResearch));
+    const job = await queue(async () => (await adminRequestChanges(admin, caseId, firstVersion, 'Name the council chair in step 1.')).job_id);
+    const job_id = job.id;
+    const outcome = await work(job, cleanScripts(quietResearch));
     expect(outcome).toMatchObject({ jobId: job_id, kind: 'revision', status: 'succeeded' });
 
     const versions = await listStaffVersions(admin, caseId);
@@ -140,8 +177,9 @@ describe.skipIf(!reachable)('pipeline worker against the local Supabase stack', 
   it('an update with nothing new finishes as no_changes and leaves the live version alone', async () => {
     const [latest] = await listStaffVersions(admin, caseId);
     await adminPublish(admin, caseId, latest!.version);
-    const jobId = await adminRequestUpdate(admin, caseId);
-    const outcome = await work(cleanScripts(quietResearch));
+    const job = await queue(() => adminRequestUpdate(admin, caseId));
+    const jobId = job.id;
+    const outcome = await work(job, cleanScripts(quietResearch));
     expect(outcome).toMatchObject({ jobId, kind: 'update', status: 'no_changes' });
     expect((await getPipelineJob(admin, jobId))?.status).toBe('no_changes');
     const versions = await listStaffVersions(admin, caseId);
@@ -150,8 +188,10 @@ describe.skipIf(!reachable)('pipeline worker against the local Supabase stack', 
 
   it('an update with a material development lands a revision of the live version in review', async () => {
     const [live] = await listStaffVersions(admin, caseId);
-    const jobId = await adminRequestUpdate(admin, caseId);
+    const job = await queue(() => adminRequestUpdate(admin, caseId));
+    const jobId = job.id;
     const outcome = await work(
+      job,
       cleanScripts({
         ...quietResearch,
         records_researcher: researcherScript([
@@ -167,17 +207,18 @@ describe.skipIf(!reachable)('pipeline worker against the local Supabase stack', 
   });
 
   it('marks the job failed, with the error, when the pipeline cannot finish', async () => {
-    const jobId = await adminCreateCase(admin, 'A brief the researchers cannot handle');
-    const outcome = await work({ scoper: scoperScript(`${slug}-fail`) });
+    const job = await queue(() => adminCreateCase(admin, 'A brief the researchers cannot handle'));
+    const jobId = job.id;
+    const outcome = await work(job, { scoper: scoperScript(`${slug}-fail`) });
     expect(outcome).toMatchObject({ jobId, status: 'failed' });
-    const job = await getPipelineJob(admin, jobId);
-    expect(job?.status).toBe('failed');
-    expect(job?.error).toMatch(/every researcher failed/);
+    const failed = await getPipelineJob(admin, jobId);
+    expect(failed?.status).toBe('failed');
+    expect(failed?.error).toMatch(/every researcher failed/);
     const log = await listResearchLog(admin, jobId);
     expect(log.some((r) => r.kind === 'note' && r.excerpt?.startsWith('Job failed'))).toBe(true);
   });
 
-  it('returns null when the queue is empty', async () => {
-    expect(await work(cleanScripts())).toBeNull();
+  it('returns null when there is no job to claim', async () => {
+    expect(await work(null, cleanScripts())).toBeNull();
   });
 });

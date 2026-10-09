@@ -302,3 +302,41 @@ describe('prompt builders include their inputs', () => {
     expect(p).toContain(loaded.steps.at(-1)!.headline);
   });
 });
+
+describe('outlineFromCase (revisions and updates skip the scoper)', () => {
+  const hq = (id: string, question: string, status: 'answered' | 'open', side_id?: string) =>
+    HardQuestion.parse({ id, question, blocking: true, status, round: 1, ...(side_id ? { side_id } : {}) });
+
+  it('never makes the base version\'s open questions must-answer items; they go to the notes to be kept', () => {
+    expect(harbor.open_questions.length).toBeGreaterThan(0);
+    const rev = outlineFromCase(harbor, { instructions: 'Name the council chair in step 1.' });
+    expect(Outline.safeParse(rev).success).toBe(true);
+    expect(rev.must_answer[0]).toContain('Name the council chair in step 1.');
+    for (const q of harbor.open_questions) {
+      expect(rev.must_answer.some((m) => m.includes(q))).toBe(false);
+      expect(rev.notes).toContain(q);
+    }
+  });
+
+  it('asks an update what is new since the live as-of date', () => {
+    const upd = outlineFromCase(harbor, { sinceAsOf: harbor.as_of });
+    expect(Outline.safeParse(upd).success).toBe(true);
+    expect(upd.must_answer[0]).toContain(`since ${harbor.as_of}`);
+  });
+
+  it('carries over the must-answer items the base run answered (no-side hard questions), else falls back to the question', () => {
+    const reviewed: Case = {
+      ...harbor,
+      review: {
+        ...harbor.review,
+        hard_questions: [
+          hq('hq-r1-1', 'When did the city close the bridge, and why?', 'answered'),
+          hq('hq-r1-2', 'What did the council know about the deck before the vote?', 'answered', harbor.sides[0]!.id),
+          hq('hq-r1-3', 'Will the state restore the grants next year?', 'open'),
+        ],
+      },
+    };
+    expect(outlineFromCase(reviewed).must_answer).toEqual(['When did the city close the bridge, and why?']);
+    expect(outlineFromCase(harbor).must_answer).toEqual([expect.stringContaining(harbor.question.prompt)]);
+  });
+});

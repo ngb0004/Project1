@@ -16,10 +16,19 @@ import type { AgentRunner } from './runner/types';
  * new) or failed with the error.
  */
 
+/** Takes the next job off the queue for this worker, or null when there is none. */
+export type ClaimJob = (db: Db, workerId: string) => Promise<PipelineJobRow | null>;
+
 export interface WorkerDeps {
   db: Db;
   runner: AgentRunner;
   workerId?: string;
+  /**
+   * How a job is claimed (default `claimNextJob`: the oldest queued job, through
+   * pipeline_claim_job). Tests that share the queue with other suites pass a claim
+   * that only takes the job they queued.
+   */
+  claim?: ClaimJob;
   agents?: PipelineAgents;
   /** Spend cap per job, in USD. */
   budgetUsd?: number;
@@ -53,6 +62,12 @@ async function loadVersion(db: Db, caseId: string, version: number) {
   if (!row) throw new Error(`version ${version} of case ${caseId} was not found`);
   return CaseSchema.parse(row.doc);
 }
+
+/** The default claim: pipeline_claim_job, which takes the oldest queued job (or a stale running one). */
+export const claimNextJob: ClaimJob = async (db, workerId) => {
+  const claimed = await rpc<PipelineJobRow[]>(db, 'pipeline_claim_job', { p_worker: workerId });
+  return claimed?.[0] ?? null;
+};
 
 /** Builds the pipeline request for a claimed job. */
 export async function requestForJob(db: Db, job: PipelineJobRow): Promise<PipelineRequest> {
@@ -88,8 +103,7 @@ export async function freeSlug(db: Db, slug: string): Promise<string> {
 /** Claims and runs one job. Returns null when the queue is empty. */
 export async function runWorkerOnce(deps: WorkerDeps): Promise<JobOutcome | null> {
   const { db } = deps;
-  const claimed = await rpc<PipelineJobRow[]>(db, 'pipeline_claim_job', { p_worker: deps.workerId ?? defaultWorkerId() });
-  const job = claimed?.[0];
+  const job = await (deps.claim ?? claimNextJob)(db, deps.workerId ?? defaultWorkerId());
   if (!job) return null;
 
   const progress = (m: string) => deps.onProgress?.(`[job ${job.id.slice(0, 8)}] ${m}`);

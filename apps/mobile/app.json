@@ -9,7 +9,8 @@
     "userInterfaceStyle": "light",
     "backgroundColor": "#F6F2EA",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ngb0004.dive"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +19,8 @@
         "backgroundImage": "./assets/images/dive-adaptive-background.png",
         "monochromeImage": "./assets/images/dive-adaptive-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.ngb0004.dive"
     },
     "web": {
       "output": "single",
@@ -42,6 +44,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "eab1022a-9b1c-493a-ad34-c35ec1a44f79"
+      }
+    },
+    "owner": "ngb0004"
   }
 }

@@ -45,6 +45,35 @@ export function matchQuote(quote: string, text: string): QuoteMatch {
   return { ok: true };
 }
 
+/** Words that reverse a quote when they are cut off its start. */
+const NEGATIONS = new Set(['no', 'not', 'never', 'nor', 'neither', 'none', 'nobody', 'nothing', 'without', 'cannot']);
+
+/**
+ * The word just before each place `quote` starts in `text` (both normalized;
+ * quote marks, brackets and dashes between them skipped), or an empty list
+ * when the quote is not found. Used to catch a quote that cuts a negation off
+ * its start ("said no \"rational jury could find ...\"").
+ */
+export function wordsBeforeQuote(quote: string, text: string): string[] {
+  const first = fragments(quote)[0];
+  if (!first || !matchQuote(quote, text).ok) return [];
+  const hay = normalizeForMatch(text);
+  const out: string[] = [];
+  for (let at = hay.indexOf(first); at >= 0; at = hay.indexOf(first, at + 1)) {
+    const before = hay.slice(Math.max(0, at - 60), at).replace(/[\s"'(\[\u2014-]+$/u, '');
+    const m = /([\p{L}']+)$/u.exec(before);
+    out.push(m ? m[1]!.toLowerCase() : '');
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
+/** Whether a word negates what follows it ("no", "not", "never", "didn't", ...). */
+export function isNegation(word: string): boolean {
+  const w = word.toLowerCase().replace(/\u2019/g, "'");
+  return NEGATIONS.has(w) || /n't$/.test(w);
+}
+
 export function quoteInText(quote: string, text: string): boolean {
   return matchQuote(quote, text).ok;
 }

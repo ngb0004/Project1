@@ -1,6 +1,6 @@
 import type { Case, CaseInput, Confidence, FactCheckVerdict } from '@sia/case-schema';
 import type { SourceStore } from './research/store';
-import { matchQuote } from './research/text';
+import { isNegation, matchQuote, normalizeForMatch, wordsBeforeQuote } from './research/text';
 
 /**
  * The deterministic layer of the fact-check. It needs no model and cannot be
@@ -43,6 +43,11 @@ export function checkCitations(input: AnyCase, store: SourceStore): CitationFail
     return src ? store.findAllByUrl(src.url) : [];
   };
   const cited = new Set<string>();
+  // Publications (news and analysis outlets) in the source list: a quote layer's speaker is never one of them.
+  const newsPublishers = (c.sources ?? [])
+    .filter((s) => s.type === 'news' || s.type === 'analysis')
+    .map((s) => publicationKey(s.publisher))
+    .filter((p) => p.length >= 3);
 
   const fail = (f: Omit<CitationFailure, 'claim'> & { claim: string }) =>
     out.push({ ...f, claim: clip(f.claim.trim() || f.target, 2000), ...(f.quote ? { quote: clip(f.quote, 1500) } : {}) });
@@ -121,7 +126,13 @@ export function checkCitations(input: AnyCase, store: SourceStore): CitationFail
           break;
         case 'quote': {
           const texts = opened(target, layer.text, layer.source_id);
-          if (texts) checkQuote(target, `${layer.speaker}: ${layer.text}`, layer.source_id, layer.text, texts);
+          if (!texts) break;
+          const before = out.length;
+          checkQuote(target, `${layer.speaker}: ${layer.text}`, layer.source_id, layer.text, texts);
+          if (out.length === before) {
+            const problem = quoteLayerProblem(layer, texts, newsPublishers);
+            if (problem) fail({ target, claim: `${layer.speaker}: ${layer.text}`, source_id: layer.source_id, verdict: 'unsupported', quote: layer.text, note: problem });
+          }
           break;
         }
         case 'context':
@@ -148,6 +159,40 @@ export function checkCitations(input: AnyCase, store: SourceStore): CitationFail
   }
 
   return out;
+}
+
+const publicationKey = (s: string) => normalizeForMatch(s).toLowerCase().replace(/^the\s+/, '').replace(/[.,]+$/, '');
+
+const NARRATION = /\b(describing|describes|described|reporting|reports|reported|summariz\w*|paraphras\w*|according to|as quoted|quoted (?:by|in|after))\b/i;
+
+/**
+ * Why a quote layer misrepresents its source, or null. A quote layer shows words
+ * the named speaker said or wrote, in quotation marks, so it fails when:
+ * - its text starts mid-sentence (a lowercase first letter, after any ellipsis);
+ * - the word just before it in the source is a negation it cut off;
+ * - its speaker is a publication (the text is the outlet's narration or
+ *   paraphrase, which belongs in a context layer), or describes narration;
+ * - its speaker field carries a note in parentheses or brackets.
+ */
+export function quoteLayerProblem(layer: { speaker: string; text: string }, snapshots: string[], publications: string[]): string | null {
+  const start = layer.text.replace(/^[\s"'\u201c\u2018.\u2026\[\]]+/u, '');
+  if (/^\p{Ll}/u.test(start)) {
+    return 'Quote layer starts mid-sentence (lowercase first word): a quote layer must start at a sentence or quotation boundary, so readers see the speaker\'s whole statement.';
+  }
+  const before = snapshots.map((t) => wordsBeforeQuote(layer.text, t)).find((w) => w.length > 0) ?? [];
+  if (before.length && before.every(isNegation)) {
+    return `Quote layer cuts a negation off its start: the source has "${before[0]}" right before the quoted words, so the layer as shown says the opposite.`;
+  }
+  const speaker = normalizeForMatch(layer.speaker);
+  if (/[()[\]]/.test(speaker)) {
+    return 'Quote layer speaker carries a note in parentheses or brackets: the speaker field holds only a name and role.';
+  }
+  const head = publicationKey(speaker.split(',')[0] ?? speaker);
+  const names = (p: string) => new RegExp(`(^|[^\\p{L}\\p{N}])${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'u').test(head);
+  if (NARRATION.test(speaker) || publications.some(names)) {
+    return `Quote layer speaker "${clip(layer.speaker, 120)}" is a publication or its narration, not the person quoted: a reporter's paraphrase belongs in a context layer.`;
+  }
+  return null;
 }
 
 /** A stable key for comparing failures between two versions of a draft. */

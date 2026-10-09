@@ -271,6 +271,7 @@ function cleanDraft(): DraftCase {
       { id: SIDE_A.id, label: SIDE_A.label, steelman: 'Supporters argue the council knew from the 2024 inspection that the main was in poor condition and still voted to postpone the replacement.' },
       { id: SIDE_B.id, label: SIDE_B.label, steelman: 'Supporters argue the 40 percent cut in state grants left the county without the money to replace the main on time.' },
     ],
+    timeline: [],
     takes: [],
     open_questions: ['Could the county have moved other funds to the replacement in 2025?'],
     sources: [

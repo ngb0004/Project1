@@ -190,6 +190,7 @@ export function userFacingTexts(c: CaseInput | DraftCase): Array<{ path: string;
     add(`sides.${i}.label`, s.label);
     add(`sides.${i}.steelman`, s.steelman);
   });
+  (c.timeline ?? []).forEach((e, i) => add(`timeline.${i}.text`, e.text));
   (c.takes ?? []).forEach((t, i) => {
     add(`takes.${i}.label`, t.label);
     (t.checks ?? []).forEach((ch, j) => add(`takes.${i}.checks.${j}.note`, ch.note));

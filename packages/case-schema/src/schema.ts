@@ -275,6 +275,24 @@ export const Side = z
 export type Side = z.infer<typeof Side>;
 
 // ---------------------------------------------------------------------------
+// What happened, in order
+// ---------------------------------------------------------------------------
+
+/** One dated event in the case's recap timeline, shown after the facts. */
+export const TimelineEvent = z
+  .object({
+    id: LocalId,
+    date: PartialIsoDate,
+    /** One short, plain sentence. */
+    text: Text(240),
+    source_ids: z.array(LocalId).min(1, 'every timeline event must cite a source'),
+    /** Admin-only supporting quotes. */
+    evidence: z.array(Evidence).optional(),
+  })
+  .strict();
+export type TimelineEvent = z.infer<typeof TimelineEvent>;
+
+// ---------------------------------------------------------------------------
 // How the story is told online
 // ---------------------------------------------------------------------------
 
@@ -532,6 +550,8 @@ export const Case = z
     steps: z.array(Step).min(1),
     /** Strongest case for each side, in its own words. */
     sides: z.array(Side).min(2),
+    /** What happened, in date order: a recap shown after the facts. */
+    timeline: z.array(TimelineEvent).default([]),
     /** How the story is being told online, by lens, with each claim checked. */
     takes: z.array(Take).default([]),
     /** What is still unknown, shown at the end. */

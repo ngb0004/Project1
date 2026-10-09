@@ -293,6 +293,7 @@ function projectDoc(doc: PublicCase, caseId: string, version: number): PublicCas
   };
   out.steps = doc.steps.map((s) => strip(s, ADMIN_ONLY_STEP_KEYS));
   out.starting_facts = doc.starting_facts.map((f) => strip(f, ['evidence']));
+  out.timeline = (doc.timeline ?? []).map((e) => strip(e, ['evidence']));
   out.takes = (doc.takes ?? []).map((t) => ({ ...t, checks: t.checks.map((ch) => strip(ch, ['evidence'])) }));
   return JSON.parse(JSON.stringify(out)) as PublicCase;
 }

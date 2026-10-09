@@ -347,6 +347,14 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
       await id(testIds.next).click();
     }
 
+    // What happened, in order.
+    if (doc.timeline.length > 0) {
+      await visible(id(testIds.timelineScreen));
+      for (const e of doc.timeline) await visible(page.getByText(e.text, { exact: true }));
+      await assertNoCrowd(page, 'timeline');
+      await id(testIds.next).click();
+    }
+
     // How the story is told online.
     if (doc.takes.length > 0) {
       await visible(id(testIds.takesScreen));

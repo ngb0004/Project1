@@ -12,6 +12,7 @@ import {
   type Step,
   type Take,
   type TakeCheck,
+  type TimelineEvent,
 } from '@sia/case-schema';
 
 /**
@@ -202,6 +203,12 @@ export function newSide(doc: Doc): Side {
   return { id: uniqueId('side', (doc.sides ?? []).map((s) => s.id)), label: '', steelman: '' };
 }
 
+/** A blank timeline event dated like the last one. */
+export function newEvent(doc: Doc): TimelineEvent {
+  const events = doc.timeline ?? [];
+  return { id: uniqueId('e', events.map((e) => e.id)), date: events.at(-1)?.date ?? doc.as_of ?? '', text: '', source_ids: [] };
+}
+
 /** A blank online take for the first lens the case does not have yet. */
 export function newTake(doc: Doc): Take {
   const takes = doc.takes ?? [];
@@ -286,6 +293,11 @@ export function renameSourceId(doc: Doc, from: string, to: string): Doc {
         depth: (s.depth ?? []).map((l) => renameInLayer(l, from, to)),
       };
       if (s.evidence) next.evidence = ev(s.evidence);
+      return next;
+    }),
+    timeline: (doc.timeline ?? []).map((e) => {
+      const next: TimelineEvent = { ...e, source_ids: swapAll(e.source_ids, from, to) ?? [] };
+      if (e.evidence) next.evidence = ev(e.evidence);
       return next;
     }),
     takes: (doc.takes ?? []).map((t) => ({
@@ -421,6 +433,7 @@ export function citationsBySource(doc: Doc): Map<string, string[]> {
       else for (const e of l.entries ?? []) for (const id of e.source_ids ?? []) add(id, where);
     }
   }
+  for (const e of doc.timeline ?? []) for (const id of e.source_ids ?? []) add(id, `timeline ${e.id}`);
   for (const t of doc.takes ?? []) {
     for (const id of t.source_ids ?? []) add(id, `take ${t.id}`);
     (t.checks ?? []).forEach((c, i) => {

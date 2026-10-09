@@ -52,6 +52,7 @@ const doc: PublicCase = {
     { id: 'yes', label: 'It matters', steelman: 'The case for yes.' },
     { id: 'no', label: 'It does not', steelman: 'The case for no.' },
   ],
+  timeline: [],
   takes: [],
   open_questions: ['What is still unknown?'],
   sources: [SOURCE],

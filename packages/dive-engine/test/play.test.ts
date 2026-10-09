@@ -53,6 +53,7 @@ function proseOf(doc: PublicCase): string[] {
     ...doc.starting_facts.map((f) => f.text),
     ...doc.steps.flatMap((s) => [s.headline, s.body, s.micro_poll.statement, ...s.depth.flatMap(layerText)]),
     ...doc.sides.flatMap((s) => [s.label, s.steelman]),
+    ...doc.timeline.map((e) => e.text),
     ...doc.takes.flatMap(takeText),
     ...doc.open_questions,
   ];
@@ -126,6 +127,10 @@ function render(state: DiveState): Rendered {
       }
       break;
     }
+    case 'timeline':
+      out.record.push(...doc.timeline.map((e) => e.text));
+      out.chrome.push(...doc.timeline.map((e) => formatDate(e.date)));
+      break;
     case 'takes':
       out.record.push(...doc.takes.flatMap(takeText));
       out.chrome.push(...doc.takes.flatMap((t) => t.checks.map((c) => CHECK_VERDICT_LABEL[c.verdict])));
@@ -347,7 +352,7 @@ describe.each(FIXTURES)('%s plays through the full flow', (name) => {
     const n = doc.steps.length;
     // Every screen once, in order (the restart resumed exactly where the reader left off).
     expect(r.visited).toEqual(buildScreens(doc).map((s) => s.kind));
-    expect(r.visited).toHaveLength(n + 7);
+    expect(r.visited).toHaveLength(n + 6 + (doc.timeline.length > 0 ? 1 : 0) + (doc.takes.length > 0 ? 1 : 0));
     // The online-takes screen showed every take and its checks.
     expect(r.renders.takes![0]!.record).toEqual(doc.takes.flatMap(takeText));
     expect(r.slots).toEqual(['before', ...doc.steps.map((s) => s.id), 'after']);
@@ -376,8 +381,8 @@ describe('two different case files, no code change', () => {
     const [a, b] = FIXTURES.map((f) => results.get(f)!);
     expect(a && b).toBeTruthy();
     const screens = (r: PlayResult) => r.visited.length;
-    expect(screens(a!)).toBe(a!.doc.steps.length + 7);
-    expect(screens(b!)).toBe(b!.doc.steps.length + 7);
+    expect(screens(a!)).toBe(buildScreens(a!.doc).length);
+    expect(screens(b!)).toBe(buildScreens(b!.doc).length);
     expect(screens(a!)).not.toBe(screens(b!));
     expect(a!.doc.sides.length).not.toBe(b!.doc.sides.length);
     expect(Boolean(a!.doc.content_warning)).not.toBe(Boolean(b!.doc.content_warning));

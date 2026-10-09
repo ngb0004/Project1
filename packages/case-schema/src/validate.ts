@@ -36,7 +36,8 @@ export type IssueCode =
   | 'as_of_future'
   | 'review_mismatch'
   | 'reading_level'
-  | 'missing_takes';
+  | 'missing_takes'
+  | 'timeline_order';
 
 export interface Issue {
   /** Dotted path into the case document, e.g. `steps.2.source_ids`. */
@@ -263,6 +264,21 @@ export function checkCaseRules(c: Case, opts: ValidateOptions = {}): { errors: I
 
   plain('question.prompt', c.question.prompt);
 
+  // What happened, in order
+  const eventIds = new Set<string>();
+  let lastDate = '';
+  c.timeline.forEach((e, i) => {
+    const ep = `timeline.${i}`;
+    if (eventIds.has(e.id)) err(`${ep}.id`, 'duplicate_id', `Duplicate timeline event id "${e.id}".`);
+    eventIds.add(e.id);
+    checkCites(`${ep}.source_ids`, e.source_ids);
+    checkEvidence(ep, e.source_ids, e.evidence);
+    checkNotSocialOnly(`${ep}.source_ids`, e.source_ids);
+    plain(`${ep}.text`, e.text);
+    if (e.date < lastDate) warn(`${ep}.date`, 'timeline_order', `Timeline events should run oldest first; ${e.date} comes after ${lastDate}.`);
+    lastDate = e.date;
+  });
+
   // How the story is told online
   if (c.takes.length === 0) {
     warn('takes', 'missing_takes', 'No online takes. Show how the left, the center and the right are telling the story.');
@@ -332,7 +348,9 @@ export function checkCaseRules(c: Case, opts: ValidateOptions = {}): { errors: I
         ? sideIds.has(row.target.slice(5))
         : row.target.startsWith('take:')
           ? takeIds.has(row.target.slice(5).split('/')[0]!)
-          : confidenceOf(row.target) !== undefined;
+          : row.target.startsWith('event:')
+            ? eventIds.has(row.target.slice(6))
+            : confidenceOf(row.target) !== undefined;
     if (!known) warn(`${rp}.target`, 'unknown_reference', `Fact-check row refers to unknown target "${row.target}".`);
     if (row.round !== latestRound) return;
     if (row.verdict === 'unsupported' || row.verdict === 'uncited' || row.verdict === 'source_unavailable') {

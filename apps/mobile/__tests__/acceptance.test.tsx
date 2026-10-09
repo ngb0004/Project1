@@ -3,7 +3,7 @@ import type { JsonElement, JsonNode } from 'test-renderer';
 import type { Case } from '@sia/case-schema';
 import { VOTE_ORDER, VOTE_VALUE, buildScreens, mirrorText, shareHeadline, yourVoteText, type ScreenKind } from '@sia/dive-engine';
 import { LocalDiveApi } from '@sia/dive-engine/local';
-import { DiveFlow, depthLayerId, steelmanId, takeId, testIds, voteOptionId } from '@sia/dive-ui';
+import { DiveFlow, depthLayerId, steelmanId, takeId, testIds, timelineEventId, voteOptionId } from '@sia/dive-ui';
 import { loadFixtures } from './playThrough';
 
 /**
@@ -95,6 +95,7 @@ const SCREEN_TEST_ID: Record<ScreenKind, string> = {
   starting_facts: testIds.startingFacts,
   before: testIds.beforeScreen,
   step: testIds.stepScreen,
+  timeline: testIds.timelineScreen,
   takes: testIds.takesScreen,
   after: testIds.afterScreen,
   final: testIds.finalScreen,
@@ -239,6 +240,14 @@ describe.each(fixtures.map((d) => [d.slug, d] as const))('%s', (_slug, doc) => {
       await press(testIds.next);
     }
     getReveal.mockClear(); // the calls above were the test's own, not the app's
+
+    // What happened, in order: every timeline event, from the record.
+    if (doc.timeline.length > 0) {
+      await arrive(testIds.timelineScreen);
+      for (const e of doc.timeline) expect(within(screen.getByTestId(timelineEventId(e.id))).getByText(e.text)).toBeOnTheScreen();
+      expectNoCrowd();
+      await press(testIds.next);
+    }
 
     // How the story is told online: every take and every check, from the record.
     if (doc.takes.length > 0) {

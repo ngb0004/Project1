@@ -27,6 +27,7 @@ export const testIds = {
   afterScreen: 'after-screen',
   stepScreen: 'step-screen',
   takesScreen: 'takes-screen',
+  timelineScreen: 'timeline-screen',
   finalScreen: 'final-screen',
   shareScreen: 'share-screen',
 
@@ -79,6 +80,7 @@ export const testIds = {
 } as const;
 
 export const voteOptionId = (vote: string) => `vote-${vote}`;
+export const timelineEventId = (eventId: string) => `event-${eventId}`;
 export const takeId = (takeId: string) => `take-${takeId}`;
 export const depthLayerId = (layerId: string) => `depth-layer-${layerId}`;
 export const sourceLinkId = (sourceId: string) => `source-link-${sourceId}`;

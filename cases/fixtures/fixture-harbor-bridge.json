@@ -288,5 +288,31 @@
         }
       ]
     }
+  ],
+  "timeline": [
+    {
+      "id": "e1",
+      "date": "2023",
+      "text": "Inspectors rate the bridge deck poor. This is a fictional test fixture.",
+      "source_ids": [
+        "src-inspection"
+      ]
+    },
+    {
+      "id": "e2",
+      "date": "2024",
+      "text": "The state cuts its bridge grant by 40%.",
+      "source_ids": [
+        "src-state"
+      ]
+    },
+    {
+      "id": "e3",
+      "date": "2025",
+      "text": "A new crack closes the bridge.",
+      "source_ids": [
+        "src-news"
+      ]
+    }
   ]
 }

@@ -37,6 +37,16 @@ describe('validateCase', () => {
     expect(r.warnings).toContainEqual(expect.objectContaining({ code: 'missing_takes', message: 'No "right" take.' }));
   });
 
+  it('checks timeline events: cited, oldest first', () => {
+    const c = loadFixture('fixture-harbor-bridge');
+    expect(validateCase(c).ok).toBe(true);
+    c.timeline[1].source_ids = ['src-missing'];
+    c.timeline[2].date = '2022';
+    const r = validateCase(c);
+    expect(r.errors).toContainEqual(expect.objectContaining({ code: 'unknown_source', path: 'timeline.1.source_ids.0' }));
+    expect(r.warnings).toContainEqual(expect.objectContaining({ code: 'timeline_order', path: 'timeline.2.date' }));
+  });
+
   it('warns when the main reading path is hard to read', () => {
     const c = loadFixture('fixture-harbor-bridge');
     c.steps[0].body =

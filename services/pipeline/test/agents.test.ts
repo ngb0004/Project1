@@ -280,10 +280,12 @@ describe('prompt builders include their inputs', () => {
       harbor.starting_facts.length +
         harbor.steps.length +
         harbor.steps.reduce((n, s) => n + s.depth.length, 0) +
-        // each online take, and each of its checks
+        // each timeline event, each online take, and each of its checks
+        harbor.timeline.length +
         harbor.takes.reduce((n, t) => n + 1 + t.checks.length, 0),
     );
     expect(targets.map((t) => t.target)).toContain('take:right/1');
+    expect(targets.map((t) => t.target)).toContain('event:e2');
     for (const t of targets) expect(p).toContain(JSON.stringify(t.target));
     for (const s of sources.slice(1)) expect(p).toContain(s.snapshot_id!);
     expect(p).not.toContain('DRAFTER-REASONING-MARKER');

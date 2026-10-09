@@ -67,12 +67,13 @@ const wordCount = (s: string | undefined) => (s ? s.trim().split(/\s+/).filter(B
 
 /** Estimated minutes to finish a dive: reading at 220 wpm plus ~12 seconds per poll. */
 export function estimateMinutes(
-  doc: Pick<PublicCase, 'starting_facts' | 'steps' | 'question'> & { takes?: PublicCase['takes'] },
+  doc: Pick<PublicCase, 'starting_facts' | 'steps' | 'question'> & { takes?: PublicCase['takes']; timeline?: PublicCase['timeline'] },
 ): number {
   const words =
     wordCount(doc.question.prompt) +
     doc.starting_facts.reduce((a, f) => a + wordCount(f.text), 0) +
     doc.steps.reduce((a, s) => a + wordCount(s.headline) + wordCount(s.body) + wordCount(s.micro_poll.statement), 0) +
+    (doc.timeline ?? []).reduce((a, e) => a + wordCount(e.text), 0) +
     (doc.takes ?? []).reduce((a, t) => a + wordCount(t.summary) + t.checks.reduce((b, c) => b + wordCount(c.claim), 0), 0);
   const polls = doc.steps.length + 2;
   return Math.max(1, Math.round(words / 220 + (polls * 12) / 60));

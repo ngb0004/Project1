@@ -21,6 +21,7 @@ const FIELD_LABEL: Record<string, string> = {
   micro_poll: 'Fact vote',
   statement: 'Statement',
   takes: 'Online takes',
+  timeline: 'Timeline',
   checks: 'Checks',
   claim: 'Claim',
   verdict: 'Verdict',

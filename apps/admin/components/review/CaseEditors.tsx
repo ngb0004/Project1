@@ -11,6 +11,7 @@ import {
   moveAt,
   newFact,
   newCheck,
+  newEvent,
   newSide,
   newSource,
   newTake,
@@ -189,6 +190,53 @@ export const SidesEditor = memo(function SidesEditor() {
         {readOnly ? null : (
           <button type="button" className="btn btn-small" onClick={() => update((d) => insertAt(d, ['sides'], sides.length, newSide(d)))}>
             + Add side
+          </button>
+        )}
+      </div>
+    </details>
+  );
+});
+
+export const TimelineEditor = memo(function TimelineEditor() {
+  const { update } = useEditor();
+  const readOnly = useReadOnly();
+  const events = useDoc((d) => d.timeline ?? EMPTY);
+  const ids = useIds(events);
+  return (
+    <details className="card" open id={fieldDomId('timeline')}>
+      <CardHeader path="timeline" title={`What happened, in order (${events.length})`} />
+      <div className="card-body">
+        <p className="small muted">A dated recap shown after the facts, oldest first. One short, plain sentence each, with a source.</p>
+        {events.map((e, i) => (
+          <div key={i} className="sub-item" id={fieldDomId(`timeline.${i}`)} tabIndex={-1}>
+            <div className="sub-item-head">
+              <span className="small faint">Event {i + 1}</span>
+              <span className="spacer" />
+              <ItemTools
+                index={i}
+                count={events.length}
+                noun="event"
+                onMove={(to) => update((d) => moveAt(d, ['timeline'], i, to))}
+                onRemove={() => update((d) => removeAt(d, ['timeline'], i))}
+              />
+            </div>
+            <div className="fields-3">
+              <TextField path={['timeline', i, 'date']} label="Date" placeholder="YYYY, YYYY-MM or YYYY-MM-DD" />
+              <IdField
+                path={['timeline', i, 'id']}
+                label="Event id"
+                taken={ids}
+                rename={(_from, to) => update((d) => ({ ...d, timeline: (d.timeline ?? []).map((x, j) => (j === i ? { ...x, id: to } : x)) }))}
+              />
+            </div>
+            <TextField path={['timeline', i, 'text']} label="What happened" multiline max={240} />
+            <SourceIdsField path={['timeline', i, 'source_ids']} />
+            <EvidenceEditor path={['timeline', i, 'evidence']} citedIds={e.source_ids ?? EMPTY} />
+          </div>
+        ))}
+        {readOnly ? null : (
+          <button type="button" className="btn btn-small" onClick={() => update((d) => insertAt(d, ['timeline'], events.length, newEvent(d)))}>
+            + Add event
           </button>
         )}
       </div>

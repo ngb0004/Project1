@@ -686,6 +686,7 @@ describe('summarizeDiff', () => {
       startingFacts: [],
       steps: [],
       sides: [],
+      timeline: [],
       takes: [],
       sources: [],
       summary: { added: 0, removed: 0, changed: 0, moved: 0 },

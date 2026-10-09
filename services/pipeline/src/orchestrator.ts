@@ -290,6 +290,10 @@ function citedSourceIds(c: DraftCase): Set<string> {
       else l.entries.forEach((e) => add(e.source_ids));
     }
   }
+  for (const e of c.timeline ?? []) {
+    add(e.source_ids);
+    e.evidence?.forEach((x) => ids.add(x.source_id));
+  }
   for (const t of c.takes ?? []) {
     add(t.source_ids);
     for (const ch of t.checks ?? []) {

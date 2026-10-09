@@ -173,6 +173,7 @@ describe('public projection is an allowlist', () => {
     doc.steps[1].micro_poll.secret = 1;
     doc.sides[0].secret = 1;
     doc.sources[0].secret = 1;
+    doc.timeline = [{ id: 'e1', date: '2025', text: 'Something happened.', source_ids: [doc.sources[0].id], evidence: [{ source_id: doc.sources[0].id, quote: 'admin only' }], secret: 1 }];
     doc.takes[0].secret = 1;
     doc.takes[0].checks[0].secret = 1;
     doc.takes[0].checks[0].evidence = [{ source_id: doc.takes[0].checks[0].source_ids[0], quote: 'admin only' }];

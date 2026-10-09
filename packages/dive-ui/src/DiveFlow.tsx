@@ -32,6 +32,7 @@ import {
   StartingFactsScreen,
   StepScreen,
   TakesScreen,
+  TimelineScreen,
   type PollEvents,
   type RevealFailure,
 } from './screens';
@@ -444,6 +445,9 @@ function DivePlayer({
       );
       break;
     }
+    case 'timeline':
+      body = <TimelineScreen doc={doc} openUrl={openUrl} onNext={() => go({ type: 'next' })} />;
+      break;
     case 'takes':
       body = <TakesScreen doc={doc} openUrl={openUrl} onNext={() => go({ type: 'next' })} />;
       break;

@@ -5,12 +5,12 @@ import type { Reveal, SessionStart, SlotKey } from './types';
  * The dive is a fixed sequence of screens generated from the case record.
  * The flow is identical for every case and every user:
  *
- *   case card -> starting facts -> before -> fact 1..n -> online takes -> after -> final reveal -> share
+ *   case card -> starting facts -> before -> fact 1..n -> timeline -> online takes -> after -> final reveal -> share
  *
  * Before and After ask the main question on a slider. Each fact asks for a
  * quick vote (agree, not sure, disagree) on one statement about it; the vote
- * is separate from the main position. The online-takes screen appears only
- * when the case has takes.
+ * is separate from the main position. The timeline and online-takes screens
+ * appear only when the case has a timeline or takes.
  *
  * This module is a pure state machine (a reducer plus selectors). It holds no
  * case-specific logic and never shows a crowd result for a slot that has not
@@ -22,6 +22,7 @@ export type Screen =
   | { kind: 'starting_facts' }
   | { kind: 'before' }
   | { kind: 'step'; stepId: string; index: number }
+  | { kind: 'timeline' }
   | { kind: 'takes' }
   | { kind: 'after' }
   | { kind: 'final' }
@@ -29,12 +30,15 @@ export type Screen =
 
 export type ScreenKind = Screen['kind'];
 
-export function buildScreens(doc: Pick<PublicCase, 'steps'> & { takes?: PublicCase['takes'] }): Screen[] {
+export function buildScreens(
+  doc: Pick<PublicCase, 'steps'> & { takes?: PublicCase['takes']; timeline?: PublicCase['timeline'] },
+): Screen[] {
   return [
     { kind: 'case_card' },
     { kind: 'starting_facts' },
     { kind: 'before' },
     ...doc.steps.map((s, index): Screen => ({ kind: 'step', stepId: s.id, index })),
+    ...((doc.timeline ?? []).length > 0 ? [{ kind: 'timeline' } as Screen] : []),
     ...((doc.takes ?? []).length > 0 ? [{ kind: 'takes' } as Screen] : []),
     { kind: 'after' },
     { kind: 'final' },

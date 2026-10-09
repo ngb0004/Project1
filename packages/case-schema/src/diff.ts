@@ -193,6 +193,7 @@ export interface CaseDiff {
   startingFacts: ItemDiff[];
   steps: ItemDiff[];
   sides: ItemDiff[];
+  timeline: ItemDiff[];
   takes: ItemDiff[];
   sources: ItemDiff[];
   /** Counted over starting facts + steps + sides + takes + sources. A moved item that also changed counts in both. */
@@ -371,13 +372,14 @@ function diffValue(path: string, label: string, before: unknown, after: unknown,
 // Item lists
 // ---------------------------------------------------------------------------
 
-type ItemKind = 'startingFacts' | 'steps' | 'sides' | 'takes' | 'sources';
+type ItemKind = 'startingFacts' | 'steps' | 'sides' | 'timeline' | 'takes' | 'sources';
 
 /** Preferred field order per item kind; any other keys follow in document order. */
 const FIELD_ORDER: Record<ItemKind, readonly string[]> = {
   startingFacts: ['text', 'confidence', 'source_ids', 'evidence'],
   steps: ['headline', 'body', 'confidence', 'favors', 'impact', 'source_ids', 'evidence', 'depth', 'micro_poll'],
   sides: ['label', 'steelman'],
+  timeline: ['date', 'text', 'source_ids', 'evidence'],
   takes: ['lens', 'label', 'summary', 'seen_on', 'source_ids', 'checks'],
   sources: ['title', 'publisher', 'url', 'date', 'type', 'accessed_at', 'quote_excerpt'],
 };
@@ -390,6 +392,7 @@ const ADMIN_ONLY_ITEM_KEYS: Record<ItemKind, readonly string[]> = {
   startingFacts: ['evidence'],
   steps: ADMIN_ONLY_STEP_KEYS,
   sides: [],
+  timeline: ['evidence'],
   // Evidence sits inside each check; it is compared as part of `checks`.
   takes: [],
   sources: [],
@@ -493,11 +496,12 @@ export function diffCases(before: CaseLike, after: CaseLike): CaseDiff {
   const startingFacts = diffItems('startingFacts', asObjs(before.starting_facts), asObjs(after.starting_facts), compareAdmin);
   const steps = diffItems('steps', asObjs(before.steps), asObjs(after.steps), compareAdmin);
   const sides = diffItems('sides', asObjs(before.sides), asObjs(after.sides), compareAdmin);
+  const timeline = diffItems('timeline', asObjs(before.timeline), asObjs(after.timeline), compareAdmin);
   const takes = diffItems('takes', asObjs(before.takes), asObjs(after.takes), compareAdmin);
   const sources = diffItems('sources', asObjs(before.sources), asObjs(after.sources), compareAdmin);
 
   const summary = { added: 0, removed: 0, changed: 0, moved: 0 };
-  for (const d of [...startingFacts, ...steps, ...sides, ...takes, ...sources]) {
+  for (const d of [...startingFacts, ...steps, ...sides, ...timeline, ...takes, ...sources]) {
     if (d.status === 'added') summary.added++;
     else if (d.status === 'removed') summary.removed++;
     else if (d.status === 'changed') summary.changed++;
@@ -505,7 +509,7 @@ export function diffCases(before: CaseLike, after: CaseLike): CaseDiff {
   }
 
   const hasChanges = fields.length > 0 || summary.added + summary.removed + summary.changed + summary.moved > 0;
-  return { fields, startingFacts, steps, sides, takes, sources, summary, hasChanges };
+  return { fields, startingFacts, steps, sides, timeline, takes, sources, summary, hasChanges };
 }
 
 // ---------------------------------------------------------------------------
@@ -516,6 +520,7 @@ const NOUNS: Record<ItemKind, [string, string]> = {
   startingFacts: ['starting fact', 'starting facts'],
   steps: ['step', 'steps'],
   sides: ['side', 'sides'],
+  timeline: ['timeline event', 'timeline events'],
   takes: ['online take', 'online takes'],
   sources: ['source', 'sources'],
 };
@@ -629,6 +634,7 @@ export function summarizeDiff(d: CaseDiff, after: CaseLike): string {
     ...itemClauses('startingFacts', d.startingFacts, after),
     ...itemClauses('steps', d.steps, after),
     ...itemClauses('sides', d.sides, after),
+    ...itemClauses('timeline', d.timeline, after),
     ...itemClauses('takes', d.takes, after),
     ...itemClauses('sources', d.sources, after),
   ];

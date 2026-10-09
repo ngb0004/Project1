@@ -135,6 +135,10 @@ describe.each(fixtures.map((d) => [d.slug, d] as const))('%s on react-native-web
       await click(testIds.next);
     }
 
+    if (doc.timeline.length > 0) {
+      await find(testIds.timelineScreen);
+      await click(testIds.next);
+    }
     if (doc.takes.length > 0) {
       await find(testIds.takesScreen);
       await click(testIds.next);

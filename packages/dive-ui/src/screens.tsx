@@ -28,7 +28,7 @@ import { ShareCard } from './ShareCard';
 import { Slider } from './Slider';
 import { Citations, ConfidenceLabel } from './Sources';
 import { errorMessage } from './copy';
-import { fairnessRatingId, fairnessSideId, steelmanId, takeId, testIds, voteOptionId } from './testIds';
+import { fairnessRatingId, fairnessSideId, steelmanId, takeId, testIds, timelineEventId, voteOptionId } from './testIds';
 import { colors, fonts, space, type } from './theme';
 import { Body, Button, Choice, Display, Headline, Kicker, Rule, Small, TextLink, Title } from './ui';
 
@@ -428,12 +428,63 @@ export function StepScreen({
       ) : null}
       {committed ? (
         <Button
-          label={!last ? 'Next fact' : doc.takes.length > 0 ? 'How people are telling it' : 'On to the final question'}
+          label={
+            !last
+              ? 'Next fact'
+              : (doc.timeline ?? []).length > 0
+                ? 'See it all in order'
+                : (doc.takes ?? []).length > 0
+                  ? 'How people are telling it'
+                  : 'On to the final question'
+          }
           onPress={onNext}
           testID={testIds.next}
         />
       ) : null}
       <TextLink label="Something wrong with this fact? Flag it" onPress={onFlag} testID={testIds.flagLink} />
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// What happened, in order
+// ---------------------------------------------------------------------------
+
+export function TimelineScreen({
+  doc,
+  openUrl,
+  onNext,
+}: {
+  doc: PublicCase;
+  openUrl: (url: string) => void;
+  onNext: () => void;
+}) {
+  return (
+    <>
+      <View style={styles.group} testID={testIds.timelineScreen}>
+        <Kicker>The recap</Kicker>
+        <Headline>What happened, in order</Headline>
+      </View>
+      <View>
+        {(doc.timeline ?? []).map((e, i, all) => (
+          <View key={e.id} style={styles.event} testID={timelineEventId(e.id)}>
+            <View style={styles.eventRail}>
+              <View style={styles.eventDot} />
+              {i < all.length - 1 ? <View style={styles.eventLine} /> : null}
+            </View>
+            <View style={styles.eventBody}>
+              <Text style={[type.caps, styles.inkKicker]}>{formatDate(e.date)}</Text>
+              <Text style={type.body}>{e.text}</Text>
+              <Citations doc={doc} ids={e.source_ids} openUrl={openUrl} />
+            </View>
+          </View>
+        ))}
+      </View>
+      <Button
+        label={(doc.takes ?? []).length > 0 ? 'How people are telling it' : 'On to the final question'}
+        onPress={onNext}
+        testID={testIds.next}
+      />
     </>
   );
 }
@@ -453,7 +504,7 @@ export function TakesScreen({
   openUrl: (url: string) => void;
   onNext: () => void;
 }) {
-  const takes = [...doc.takes].sort((a, b) => LENS_ORDER.indexOf(a.lens) - LENS_ORDER.indexOf(b.lens));
+  const takes = [...(doc.takes ?? [])].sort((a, b) => LENS_ORDER.indexOf(a.lens) - LENS_ORDER.indexOf(b.lens));
   return (
     <>
       <View style={styles.group} testID={testIds.takesScreen}>
@@ -770,6 +821,11 @@ const styles = StyleSheet.create({
   voteButtonFaded: { opacity: 0.35 },
   voteButtonLabel: { fontFamily: type.body.fontFamily, fontSize: 16, fontWeight: '600', color: colors.ink, textAlign: 'center' },
   voteButtonLabelOn: { color: colors.paper },
+  event: { flexDirection: 'row', gap: space.md },
+  eventRail: { width: 12, alignItems: 'center' },
+  eventDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.ink, marginTop: 4 },
+  eventLine: { flex: 1, width: 2, backgroundColor: colors.rule, marginTop: 2 },
+  eventBody: { flex: 1, gap: 2, paddingBottom: space.lg },
   take: { gap: space.sm, paddingBottom: space.lg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.rule },
   takeVoice: { borderLeftWidth: 3, borderLeftColor: colors.rule, paddingLeft: space.md },
   takeVoiceText: { fontFamily: fonts.serif, fontSize: 18, lineHeight: 27, color: colors.ink, fontStyle: 'italic' },

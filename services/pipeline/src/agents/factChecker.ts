@@ -87,6 +87,9 @@ export function factCheckTargets(draft: CaseInput | DraftCase): CheckTarget[] {
       }
     }
   }
+  for (const e of draft.timeline ?? []) {
+    out.push({ target: `event:${e.id}`, text: `${e.date}: ${e.text}`, source_ids: e.source_ids ?? [], evidence: e.evidence });
+  }
   for (const t of draft.takes ?? []) {
     out.push({ target: `take:${t.id}`, text: `(${t.lens}) ${t.summary}`, source_ids: t.source_ids ?? [] });
     (t.checks ?? []).forEach((ch, j) =>
@@ -105,7 +108,7 @@ const METHOD = `
 How to work:
 - Go through the checklist in the prompt; skip nothing. For each item, read every cited source's snapshot with read_source and find the passage that bears on the item. In a long source, call find_in_source with a distinctive phrase from the evidence quote and read around that offset, then read further only where the context matters; you can call several tools at once.
 - Write at least one row per item and cited source:
-  - target: the item's target exactly as given ("s3", "fact:f1", "layer:s3/q1", "take:left", "take:left/2"); "side:<id>" only for a steelman row.
+  - target: the item's target exactly as given ("s3", "fact:f1", "layer:s3/q1", "event:e2", "take:left", "take:left/2"); "side:<id>" only for a steelman row.
   - claim: the specific statement you checked, in the draft's words.
   - source_id: the cited source you checked it against.
   - verdict: "supported" when the source says what the item says; "partially_supported" when it supports only part (the note says which part is not); "unsupported" when the source does not say it, says something different, or the evidence quote does not appear in it; "source_unavailable" when the snapshot is missing or unreadable even after re-opening; "uncited" for a factual statement that no cited source supports.

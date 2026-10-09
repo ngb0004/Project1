@@ -442,7 +442,7 @@
       "evidence": [
         {
           "source_id": "penal-law-130-00",
-          "quote": "\"Mentally incapacitated\" means that a person is rendered temporarily incapable of appraising or controlling his conduct owing to the influence of a narcotic or intoxicating substance administered to him without his consent, or to any other act committed upon him without his consent."
+          "quote": "“Mentally incapacitated” means that a person is rendered temporarily incapable of appraising or controlling his conduct owing to the influence of a narcotic or intoxicating substance administered to him without his consent,"
         },
         {
           "source_id": "mother-jones",
@@ -577,6 +577,213 @@
       "id": "did-what-facts-allowed",
       "label": "They did what the facts allowed",
       "steelman": "Supporters argue the DA read the statement she reviewed and signed, which said she agreed at first and chose to drink and take drugs, and that New York law left no case to bring. Cornell held 50 interviews, expelled two men, and a judge upheld its process. The accused men say the sex was consensual and that they have been \"tried, convicted and hung\" in public."
+    }
+  ],
+  "timeline": [
+    {
+      "id": "e1",
+      "date": "2024-10-19",
+      "text": "Jane Doe goes to the Chi Phi house. Her lawsuit says several men sexually assaulted her there that night.",
+      "source_ids": [
+        "eo64"
+      ],
+      "evidence": [
+        {
+          "source_id": "eo64",
+          "quote": "WHEREAS, on September 16, 2026, Jane Doe filed a lawsuit in the Supreme Court, New York County, alleging she was the victim of a sexual assault perpetrated by multiple individuals occurring on October 19-20, 2024;"
+        }
+      ]
+    },
+    {
+      "id": "e2",
+      "date": "2024-10-20",
+      "text": "At 1:42 a.m., a member tells a fraternity Snapchat group that a woman is \"free\" upstairs.",
+      "source_ids": [
+        "complaint",
+        "ap-bait"
+      ],
+      "evidence": [
+        {
+          "source_id": "complaint",
+          "quote": "“Chi Phi Actives” Snapchat Group (October 20, 2024, at 1:42 AM)"
+        },
+        {
+          "source_id": "ap-bait",
+          "quote": "some drawn by a message one of the fraternity brothers sent to a Snapchat group at 1:42 a.m. using a vulgar term to advertise that a woman's body was freely available."
+        }
+      ]
+    },
+    {
+      "id": "e3",
+      "date": "2024-11-03",
+      "text": "She texts one of the men that \"90% of what happened that night was not consensual.\"",
+      "source_ids": [
+        "cbs-oct1"
+      ],
+      "evidence": [
+        {
+          "source_id": "cbs-oct1",
+          "quote": "On Nov. 3, she wrote, \"let's be clear that 90% of what happened that night was not consensual,\""
+        }
+      ]
+    },
+    {
+      "id": "e4",
+      "date": "2024-11-08",
+      "text": "She reports it to Cornell police. Cornell suspends the fraternity chapter the same day.",
+      "source_ids": [
+        "ap-first-report",
+        "cornell-2024-update"
+      ],
+      "evidence": [
+        {
+          "source_id": "ap-first-report",
+          "quote": "Cornell University first publicly disclosed that it was investigating the woman's allegations on Nov. 8, 2024, the same day she first went to police."
+        },
+        {
+          "source_id": "cornell-2024-update",
+          "quote": "Chi Phi, Xi Chapter, remains under a temporary suspension order that was issued on November 8, 2024, for alleged violations of the Student Code of Conduct."
+        }
+      ]
+    },
+    {
+      "id": "e5",
+      "date": "2024-11-25",
+      "text": "The DA decides not to charge anyone, based on her six-page statement.",
+      "source_ids": [
+        "abc-declined"
+      ],
+      "evidence": [
+        {
+          "source_id": "abc-declined",
+          "quote": "On Nov. 25, 2024, more than a month after a woman now known as Jane Doe alleged she was attacked at the Chi Phi fraternity house,"
+        },
+        {
+          "source_id": "abc-declined",
+          "quote": "stated that they all agreed that, based on [her] statement, criminal charges would not be pursued in this case."
+        }
+      ]
+    },
+    {
+      "id": "e6",
+      "date": "2025-05",
+      "text": "Cornell holds 12 days of hearings on the case.",
+      "source_ids": [
+        "cny-title-ix"
+      ],
+      "evidence": [
+        {
+          "source_id": "cny-title-ix",
+          "quote": "May 2025: Three-member hearing panel held 12 days of hearings. June-July 2025: Three-member panel deliberates facts relative to university code of conduct and other policies. August 18, 2025 : Three-member panel issues its decision about the 7 accused participants."
+        }
+      ]
+    },
+    {
+      "id": "e7",
+      "date": "2025-08-18",
+      "text": "Cornell's panel decides what happens to each of the seven men.",
+      "source_ids": [
+        "cny-title-ix"
+      ],
+      "evidence": [
+        {
+          "source_id": "cny-title-ix",
+          "quote": "August 18, 2025 : Three-member panel issues its decision about the 7 accused participants."
+        }
+      ]
+    },
+    {
+      "id": "e8",
+      "date": "2026-09-16",
+      "text": "She sues Cornell, the fraternity and seven of its members.",
+      "source_ids": [
+        "eo64"
+      ],
+      "evidence": [
+        {
+          "source_id": "eo64",
+          "quote": "WHEREAS, on September 16, 2026, Jane Doe filed a lawsuit in the Supreme Court, New York County, alleging she was the victim of a sexual assault perpetrated by multiple individuals occurring on October 19-20, 2024;"
+        }
+      ]
+    },
+    {
+      "id": "e9",
+      "date": "2026-09-28",
+      "text": "The state attorney general, Letitia James, posts support for her on X.",
+      "source_ids": [
+        "msnow-james"
+      ],
+      "evidence": [
+        {
+          "source_id": "msnow-james",
+          "quote": "I’m holding her in my heart and in my prayers,” James wrote on X on Sept. 28."
+        }
+      ]
+    },
+    {
+      "id": "e10",
+      "date": "2026-09-29",
+      "text": "Gov. Hochul backs reopening the case and calls for an outside review of Cornell.",
+      "source_ids": [
+        "gov-statement-sep29"
+      ],
+      "evidence": [
+        {
+          "source_id": "gov-statement-sep29",
+          "quote": "I support the district attorney’s decision to reopen the criminal investigation."
+        },
+        {
+          "source_id": "gov-statement-sep29",
+          "quote": "That is why I am calling for outside counsel to conduct a transparent, independent review of the university’s response"
+        }
+      ]
+    },
+    {
+      "id": "e11",
+      "date": "2026-10-01",
+      "text": "Hochul takes the case from the DA and gives it to James.",
+      "source_ids": [
+        "eo64",
+        "gov-statement-oct1"
+      ],
+      "evidence": [
+        {
+          "source_id": "eo64",
+          "quote": "The Special Prosecutor's jurisdiction will displace and supersede the jurisdiction of the Tompkins County District Attorney"
+        },
+        {
+          "source_id": "gov-statement-oct1",
+          "quote": "This has, in turn, undercut my faith, and the public's faith, in the District Attorney's ability to effectively investigate and prosecute the case at this time."
+        }
+      ]
+    },
+    {
+      "id": "e12",
+      "date": "2026-10-06",
+      "text": "Cornell's board hires Sally Yates, a former top U.S. lawyer, to look at how Cornell handled it.",
+      "source_ids": [
+        "cornell-review"
+      ],
+      "evidence": [
+        {
+          "source_id": "cornell-review",
+          "quote": "A newly formed Special Committee of the Cornell University Board of Trustees announced today that it has retained former U.S. Deputy Attorney General"
+        }
+      ]
+    },
+    {
+      "id": "e13",
+      "date": "2026-10-07",
+      "text": "A lawyer for one accused student asks a court to remove James from the case.",
+      "source_ids": [
+        "cnn-oct7"
+      ],
+      "evidence": [
+        {
+          "source_id": "cnn-oct7",
+          "quote": "Attorneys representing one of the accused Cornell students filed a motion in New York State Supreme Court Wednesday asking to void Gov. Kathy Hochul’s appointment of State Attorney General Letitia James as special prosecutor"
+        }
+      ]
     }
   ],
   "takes": [
@@ -888,6 +1095,15 @@
       "accessed_at": "2026-10-09T12:00:00Z"
     },
     {
+      "id": "abc-declined",
+      "title": "Tompkins County DA's office declined to review additional material on 'gang rape' case from Cornell PD, docs show",
+      "publisher": "ABC News (Good Morning America)",
+      "url": "https://goodmorningamerica.com/news/story/tompkins-county-das-office-declined-review-additional-material-136973934",
+      "date": "2026-10-03",
+      "type": "news",
+      "accessed_at": "2026-10-08T02:07:32.666044+00:00"
+    },
+    {
       "id": "abc-hearing",
       "title": "What Jane Doe told Cornell hearing panel about alleged 2024 gang rape",
       "publisher": "ABC News",
@@ -996,6 +1212,15 @@
       "accessed_at": "2026-10-08T02:15:47.711962+00:00"
     },
     {
+      "id": "cny-title-ix",
+      "title": "Court records reveal scope of Cornell Title IX investigation",
+      "publisher": "CNY Central (WSTM)",
+      "url": "https://cnycentral.com/news/local/i-felt-like-bait-court-records-reveal-scope-of-cornell-title-ix-investigation",
+      "date": "2026-10-02",
+      "type": "news",
+      "accessed_at": "2026-10-08T02:17:47.613825+00:00"
+    },
+    {
       "id": "complaint",
       "title": "Jane Doe v. Cornell University, Inc., et al., Summons and Complaint, Index No. 161704/2026 (NYSCEF Doc. No. 1)",
       "publisher": "Supreme Court of the State of New York, New York County (filed copy hosted by Courthouse News Service)",
@@ -1012,6 +1237,15 @@
       "date": "2024-11-26",
       "type": "official",
       "accessed_at": "2026-10-08T02:13:17.868362+00:00"
+    },
+    {
+      "id": "cornell-review",
+      "title": "Special committee of Board of Trustees retains Sally Yates of King & Spalding to lead independent review",
+      "publisher": "Cornell University Board of Trustees",
+      "url": "https://statements.cornell.edu/2026/20261006-special-committee.cfm",
+      "date": "2026-10-06",
+      "type": "official",
+      "accessed_at": "2026-10-08T02:16:21.023932+00:00"
     },
     {
       "id": "da-statement",
@@ -1048,6 +1282,24 @@
       "date": "2026-10-03",
       "type": "analysis",
       "accessed_at": "2026-10-09T12:00:00Z"
+    },
+    {
+      "id": "gov-statement-oct1",
+      "title": "Statement from Governor Hochul on the Cornell University Sexual Assault Case",
+      "publisher": "Office of the Governor of New York",
+      "url": "https://governor.ny.gov/news/statement-governor-hochul-cornell-university-sexual-assault-case-0",
+      "date": "2026-10-01",
+      "type": "official",
+      "accessed_at": "2026-10-08T02:04:12.002704+00:00"
+    },
+    {
+      "id": "gov-statement-sep29",
+      "title": "Statement From Governor Hochul on Cornell University Sexual Assault Case",
+      "publisher": "Office of the Governor of New York",
+      "url": "https://governor.ny.gov/news/statement-governor-hochul-cornell-university-sexual-assault-case",
+      "date": "2026-09-29",
+      "type": "official",
+      "accessed_at": "2026-10-08T02:34:55.559054+00:00"
     },
     {
       "id": "mother-jones",

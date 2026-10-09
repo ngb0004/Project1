@@ -67,22 +67,24 @@ const started = () => run(initDive(doc, doc.id, doc.version), { type: 'session_s
 const atBefore = () => run(started(), { type: 'next' }, { type: 'next' });
 
 describe('screens', () => {
-  it('builds the same fixed sequence for every case: card, facts, before, one per step, takes, after, final, share', () => {
+  it('builds the same fixed sequence for every case: card, facts, before, one per step, timeline, takes, after, final, share', () => {
     const screens = buildScreens(doc);
     expect(screens.map((s) => s.kind)).toEqual([
       'case_card',
       'starting_facts',
       'before',
       ...stepIds.map(() => 'step'),
+      'timeline',
       'takes',
       'after',
       'final',
       'share',
     ]);
     expect(screens.filter((s) => s.kind === 'step')).toEqual(stepIds.map((stepId, index) => ({ kind: 'step', stepId, index })));
-    expect(screens.map(slotOf)).toEqual([null, null, 'before', ...stepIds, null, 'after', null, null]);
-    // a case without online takes has no takes screen
+    expect(screens.map(slotOf)).toEqual([null, null, 'before', ...stepIds, null, null, 'after', null, null]);
+    // a case without a timeline or online takes has no screen for them
     expect(buildScreens({ ...doc, takes: [] }).some((x) => x.kind === 'takes')).toBe(false);
+    expect(buildScreens({ ...doc, timeline: [] }).some((x) => x.kind === 'timeline')).toBe(false);
     expect(slotsOf(doc)).toEqual(['before', ...stepIds, 'after']);
     expect(stepById(doc, STEP2)?.headline).toBe(doc.steps[1]!.headline);
   });
@@ -156,6 +158,9 @@ describe('navigation', () => {
       expect(canAdvance(s)).toBe(false);
       s = commit(s, 50);
     }
+    s = run(s, { type: 'next' });
+    expect(currentScreen(s).kind).toBe('timeline');
+    expect(canAdvance(s)).toBe(true); // nothing to answer
     s = run(s, { type: 'next' });
     expect(currentScreen(s).kind).toBe('takes');
     expect(canAdvance(s)).toBe(true); // nothing to answer

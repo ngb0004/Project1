@@ -312,6 +312,7 @@ export function buildDraft(input: DrafterInput, ctx: AgentContext, opts: DraftOp
     // A revision or update keeps the base steelmen; a first draft writes them from the outline.
     sides: (base?.sides as DraftCase['sides'] | undefined)?.map((s) => ({ ...s })) ??
       input.outline.sides.map((s) => ({ id: s.id, label: s.label, steelman: `Supporters argue: ${s.position}` })),
+    timeline: [],
     takes: [],
     open_questions: (base?.open_questions as string[] | undefined) ?? ['What did the council know before the June 2025 vote?'],
     sources: [...sources.values()],

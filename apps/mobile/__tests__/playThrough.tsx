@@ -80,6 +80,12 @@ export async function playThrough(api: DiveApi, doc: PublicCase, deviceId = 'dev
     await press(testIds.next);
   }
 
+  if (doc.timeline.length > 0) {
+    await screen.findByTestId(testIds.timelineScreen);
+    for (const e of doc.timeline) expect(screen.getByText(e.text)).toBeOnTheScreen();
+    await press(testIds.next);
+  }
+
   if (doc.takes.length > 0) {
     await screen.findByTestId(testIds.takesScreen);
     for (const t of doc.takes) {

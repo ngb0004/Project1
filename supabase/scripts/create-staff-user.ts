@@ -6,7 +6,7 @@
  *
  * Run once per environment by the owner:
  *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
- *   pnpm --filter @sia/supabase staff:create -- --role admin --email owner@example.com --password '...'
+ *   pnpm --filter @sia/supabase staff:create --role admin --email owner@example.com --password '...'
  *
  * The service role key is used only here. Never give it to the pipeline worker.
  */

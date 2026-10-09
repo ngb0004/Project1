@@ -5,7 +5,7 @@
  * `in_review`; the owner approves it in the admin console. Nothing is published.
  *
  *   SUPABASE_URL=... SUPABASE_ANON_KEY=... SIA_STAFF_EMAIL=... SIA_STAFF_PASSWORD=... \
- *   pnpm --filter @sia/supabase import-case -- ../cases/seed/cornell.json [--seed-profile ../cases/seed/cornell.seed-profile.json]
+ *   pnpm --filter @sia/supabase import-case ../cases/seed/cornell.json [--seed-profile ../cases/seed/cornell.seed-profile.json]
  *
  * Signs in as a staff account (pipeline or admin). A seed profile can only be
  * set by the admin account.

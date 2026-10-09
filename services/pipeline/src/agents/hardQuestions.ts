@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { HardQuestion, Text, type CaseInput } from '@sia/case-schema';
+import type { ResearchGapRef } from './drafter';
 import { Gap, block, draftOnly, idPrefix, systemPrompt, type DraftCase, type HardQuestionLike } from './shared';
 import type { AgentSpec } from './types';
 
@@ -11,6 +12,8 @@ export interface HardQuestionsInput {
   must_answer: string[];
   /** Questions from earlier rounds, with how the drafter resolved them. */
   previous?: HardQuestionLike[];
+  /** What the researchers looked for and could not find or verify. */
+  research_gaps?: ResearchGapRef[];
 }
 
 /**
@@ -48,6 +51,8 @@ How to work:
 - most_moving_fact: one or two sentences naming the single fact that would move readers most if it were true, and whether the draft establishes it, reports it, or leaves it open.
 - When previous questions are given, keep their ids, re-check each against this draft, and update status and resolution.
 - Each question: id "<prefix>-<n>" with the prefix in the prompt (or its previous id), side_id for the side whose skeptic asks it (omit it for must_answer items that belong to no side), the question in one or two plain sentences, blocking, status, resolution when answered or not applicable, step_ids it concerns.
+- Research gaps (when listed) are what the researchers looked for and could not find. Raise one as a gap when the dive cannot be fair without it, with a search_hint that tries a different route (the original record, another outlet).
+- Time: ask whether the draft's newest development is really the newest, and whether anything it calls pending or upcoming could already have been decided by the as-of date.
 - Your questions are about the draft. Do not answer them from memory or add facts of your own.`;
 
 const hardQuestions: AgentSpec<HardQuestionsInput, HardQuestionsOutput> = {
@@ -74,6 +79,7 @@ const hardQuestions: AgentSpec<HardQuestionsInput, HardQuestionsOutput> = {
       `Question id prefix: "${idPrefix('hq', ctx)}".`,
     ];
     if (input.previous?.length) parts.push('Questions from earlier rounds (keep their ids):', block('previous_questions', input.previous));
+    if (input.research_gaps?.length) parts.push('What the researchers could not find or verify:', block('research_gaps', input.research_gaps));
     parts.push('Return your questions, gaps and the most moving fact.');
     return parts.join('\n\n');
   },

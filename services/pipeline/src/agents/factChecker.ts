@@ -13,6 +13,14 @@ export interface FactCheckerInput {
   draft: CaseInput | DraftCase;
   /** Every source in the draft mapped to the snapshot taken of it in this run (null when it was never opened). */
   sources: SourceSnapshotRef[];
+  /**
+   * Check only these targets (a follow-up pass on items a full pass left
+   * unchecked, or the final pass on what the editor changed). Side targets
+   * (`side:<id>`) ask for a steelman check.
+   */
+  only?: string[];
+  /** Why only those targets are checked, shown in the prompt. */
+  focus?: string;
 }
 
 /**
@@ -94,6 +102,10 @@ How to work:
   - note: what matches or what is wrong, in one to three sentences.
   - confidence_before: the item's label in the draft. confidence_after: the label the sources justify.
 - Check every detail: numbers, dates, names, who said what, and whether something reported as fact is only alleged or disputed. Check that each evidence quote appears verbatim in its source.
+- Time: a statement that something is pending, undecided, scheduled or "until" a date is supported only by a source that says so and is dated close to the draft's as_of; an inferred deadline or a status no source dated near as_of states is "unsupported" (note the newest source date you saw).
+- Starting facts (fact:*) must be agreed by every side. When a cited source, or another snapshot in the list, reports a party contesting the fact (for example a different account of how something happened), the verdict is "partially_supported", the note says who contests it, and confidence_after is "disputed".
+- confidence_after is the label the item's headline and body (or the fact's text) deserve. On a row about a detail the headline and body do not state (an extra citation, a side point in a layer), keep confidence_after equal to confidence_before and say in the note that the citation supports only that detail.
+- Quote layers: the text must be words the named speaker said or wrote, not a reporter's paraphrase, and must not start right after a negation or qualifier the quote leaves out ("no", "not", "never"); otherwise the verdict is "unsupported".
 - Confidence: "established" needs a court_record, official or primary source and no credible contest. With only news or analysis it is at most "reported"; one party's assertion is "alleged"; conflicting credible sources make it "disputed". Downgrade (never upgrade) when the sources justify less than the draft claims.
 - Fail uncited claims: when a headline, body, layer or starting fact contains a factual statement that none of its cited sources supports, add a separate row for that statement with verdict "uncited" (no source_id) or "unsupported" (the source_id it was attributed to).
 - Steelmen: add a "side:<id>" row only when a steelman states a fact that no source in the case supports.
@@ -123,8 +135,15 @@ const factChecker: AgentSpec<FactCheckerInput, FactCheckerOutput> = {
       block('draft', draft),
       'Sources and their snapshots from this run:',
       block('sources', input.sources),
-      'Checklist (every item must get at least one row per cited source):',
-      block('checklist', factCheckTargets(draft)),
+      ...(input.only?.length
+        ? [
+            `Check only the items in this checklist${input.focus ? ` (${input.focus})` : ''}; every item must get at least one row per cited source:`,
+            block('checklist', factCheckTargets(draft).filter((t) => input.only!.includes(t.target))),
+            ...(input.only.some((t) => t.startsWith('side:'))
+              ? [`Also check these steelmen for facts no source in the case supports (a "side:<id>" row each): ${input.only.filter((t) => t.startsWith('side:')).join(', ')}.`]
+              : []),
+          ]
+        : ['Checklist (every item must get at least one row per cited source):', block('checklist', factCheckTargets(draft))]),
       'Return the rows.',
     ].join('\n\n');
   },

@@ -320,7 +320,8 @@ export function buildDraft(input: DrafterInput, ctx: AgentContext, opts: DraftOp
   ];
   return {
     case: draft,
-    resolutions: critiqueRefs.map((ref) => ({ ref, resolution: `Addressed in the revision.${opts.reasoningMarker ? ` ${opts.reasoningMarker}` : ''}` })),
+    resolutions: critiqueRefs.map((ref) => ({ ref, action: 'changed' as const, resolution: `Addressed in the revision.${opts.reasoningMarker ? ` ${opts.reasoningMarker}` : ''}` })),
+    research_gaps: [],
   };
 }
 
@@ -390,7 +391,7 @@ export function factCheckerScript(): FakeScript {
 
 /** An editor that changes nothing (or applies `edit`). */
 export function editorScript(edit?: (draft: DraftCase) => DraftCase): FakeScript {
-  return (input: EditorInput): EditorOutput => ({ case: edit ? edit(structuredClone(input.draft) as DraftCase) : (input.draft as DraftCase), notes: ['No changes needed.'] });
+  return (input: EditorInput): EditorOutput => ({ case: edit ? edit(structuredClone(input.draft) as DraftCase) : (input.draft as DraftCase), notes: ['No changes needed.'], resolutions: [] });
 }
 
 /** The scripts for a run that is clean on the first round. */

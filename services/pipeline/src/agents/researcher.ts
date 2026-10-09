@@ -70,6 +70,9 @@ Each claim:
 - favors: the id of the side this fact helps, or "neutral".
 - impact: low, medium or high: how much the fact would move a fair-minded reader on the question.
 
+- Time: a claim that something is pending, undecided or scheduled needs a source dated close to the as-of date; otherwise its text says it as of the source's date ("As of Sept. 30, the motion was under advisement").
+- Tertiary pages: when an encyclopedia, aggregator or roundup states a fact, open the outlet or record it cites and log the claim from there; cite the tertiary page only when its source cannot be opened.
+
 gaps: what you looked for and could not find or verify, each with a concrete search_hint. Set blocking only when the case cannot be told fairly without it.`;
 
 const METHOD = `
@@ -77,6 +80,7 @@ const METHOD = `
 - Find the facts this side's most careful advocates rely on, in their most accurate form, from the best source available: court records, official documents and statements, and first-hand records first; then major news outlets; commentary last.
 - Get every detail right: numbers, dates, the names of public officials and institutions, who said what and when.
 - Also log the facts that cut against your side, with favors set to the side they help. An honest advocate knows the weak points; the dive needs them, and the red team will look for them.
+- For each key event, find how the other side describes it too, including what happened before and after it (for example each side's account of a defendant's conduct afterwards), so that a contested account is never presented as agreed.
 - A claim says only what its quote supports. Never stretch a quote, and never fill a gap from memory.
 
 Aim for 8 to 20 claims from at least 4 different publishers, including at least 2 that cut against your side when they exist. Prefer fewer solid claims over many thin ones, and avoid paywalled pages.

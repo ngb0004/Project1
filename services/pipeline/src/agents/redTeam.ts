@@ -58,7 +58,9 @@ Flag kinds:
 - loaded_wording: words that judge, insinuate or frame (in the question, labels, headlines, bodies, layers or steelmen), or an assertion presented as fact without "alleged", "said" or "according to".
 - order_effect: an order that stacks one side's strongest facts at the end (the last word) or at the start, or puts a rebuttal far from what it answers.
 - missing_exculpatory_fact / missing_damning_fact: a fact your side would rightly expect to see that is absent. Describe it as a lead to research and where it might be found; never state it as fact.
-- other: anything else a fair-minded member of your side would call unfair: a weak or wrong steelman for your side, a confidence label too strong for the other side's claims, a misleading number.
+- other: anything else a fair-minded member of your side would call unfair: a weak or wrong steelman for your side, a confidence label too strong for the other side's claims (or weaker for your side's than for the same kind of evidence on the other side, such as each side's expert testimony), a misleading number, or a question worded so that your side carries a burden the law does not put on it.
+
+Neutral steps and the ending: for every step tagged favors "neutral", ask whether it actually helps one side (an outcome, a vote tally, a procedural setback, a related lawsuit). If it does, flag it (order_effect, with step_id) and say which side it helps, so the balance count is honest. Read the last third of the dive as a whole: flag it when it leans to one side, counting neutral-tagged steps by the side they really help.
 
 Severity:
 - high: a fair-minded reader on your side would call the whole dive unfair, or a fact is misstated.

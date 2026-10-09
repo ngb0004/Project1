@@ -95,33 +95,34 @@ const METHOD = `
 What to build (the case JSON):
 - schema_version 1, id: the slug, status "draft", version 1 (the database assigns the real id, version and status). When revising or updating a base version, keep its id and slug, set version to its version + 1 and parent_version to its version.
 - as_of: the run's as-of date.
-- slug, title, question ({prompt, scale: {type "slider", min 0, max 100, left_label, right_label}}) and content_warning (leave it out when the outline has none): from the outline.
-- starting_facts: 3 to 6 agreed, no-spin baseline facts that every side accepts (who, what, when, where). Ids "f1", "f2", and so on.
-- steps: 8 to 14 steps (fewer when the research is thin), ids "s1", "s2", and so on, with order 1..n matching their position.
+- slug, title, question ({prompt, scale: {type "slider", min 0, max 100, left_label, right_label}}) and content_warning (leave it out when the outline has none): from the outline. In a new case (no base version) you may reword question.prompt only to answer a critique flag about its wording (loaded or one-sided framing, or a framing that puts the burden of proof on one side when the law puts it on the other), keeping the same actor, outcome and scale; when the law puts the burden on one party, word the question around what that party must prove, or in burden-neutral terms. In a revision or a live update, never change the question.
+- starting_facts: 3 to 6 agreed, no-spin baseline facts that every side accepts (who, what, when, where, and procedural facts such as the charges, a trial date or a mistrial). Before a fact goes here, check the claims and snapshots for a party contesting it (for example the two sides' accounts of how something happened): a contested fact is a step labeled "disputed" or "alleged", never a starting fact. Ids "f1", "f2", and so on.
+- steps: 8 to 14 steps (fewer when the research is thin), ids "s1", "s2", and so on, with order 1..n matching their position. Each step is evidence that bears on the question: a fact that could move a reader's answer, and each ends in a micro-poll. Procedural posture and outcomes (a hung jury, how jurors voted, a hearing date, a pending motion, a related lawsuit's filing) are not evidence about the question: put them in starting_facts, a context or timeline layer, or open_questions, not in a polled step.
   - headline: one line, at most 160 characters, stating a fact, not a conclusion.
   - body: 2 to 4 sentences giving the fact and the context a reader needs. No rhetorical questions, no verdicts on guilt or blame.
-  - depth: 1 to 3 tap-to-go-deeper layers where the research supports them: "document" (title, a summary of the document, source_id), "quote" (text copied verbatim from a source, the speaker, optional context, source_id), "timeline" (dated entries, each with source_ids; use the claims' event_date), "context" (title, background body, source_ids). Layer ids such as "d1", "q1", "t1", "c1", unique within the step.
-  - favors: the side id the fact helps, or "neutral". impact: low, medium or high.
+  - depth: 1 to 3 tap-to-go-deeper layers where the research supports them: "document" (title, a summary of the document, source_id), "quote" (words the named speaker said or wrote, copied verbatim from where the source puts them in quotation marks; start at the beginning of a sentence or of the quotation, and never cut a negation or qualifier such as "no", "not", "never" or "only" off its start; speaker is only the person's name and role, with no notes or parentheses; optional context; source_id). A reporter's paraphrase, or a publication describing testimony, is a "context" layer, never a quote layer., "timeline" (dated entries, each with source_ids; use the claims' event_date), "context" (title, background body, source_ids). Layer ids such as "d1", "q1", "t1", "c1", unique within the step.
+  - favors: the side id the fact helps, or "neutral" only when it helps neither side (not to keep a step out of the balance count). impact: low, medium or high.
   - source_ids: every source the step relies on, at least one. evidence: at least one {source_id, quote} for each cited source, with the quote copied verbatim from a claim's quote or from read_source output for that source's snapshot.
   - confidence (rules below). micro_poll: {"prompt": "${DEFAULT_MICRO_POLL_PROMPT}", "re_ask_slider": true}.
 - Starting facts also carry source_ids, confidence and evidence the same way.
 - sides: the outline's sides (same ids and labels), each with a steelman: the strongest case for that side in its supporters' own terms, 2 to 5 sentences built only from the claims and attributed ("Supporters argue ...").
-- open_questions: 2 to 6 things that are still unknown or unresolved, as plain questions.
+- open_questions: 2 to 6 things that are still unknown in the public record as of the as-of date (a pending ruling, a sealed record, a report not yet released), as plain questions. A fact you could not find in the claims is a research gap, not an open question: list it in research_gaps instead.
+- research_gaps: facts the dive needs that no claim supplies (the admin sees them; readers never do). Empty when there are none.
 - sources: one per URL you cite, id "src-<short-name>": title, publisher, url (exactly the claim's url), date (the claim's source_date; when it is null, the year shown on the page, or else the year in accessed_at), type (the claim's source_type), accessed_at (the fetched_at of its snapshot in <opened>, or else the as-of date at 00:00:00Z). Include no source that no claim or base version supplied.
 
 Rules:
-- Use ONLY the claims and snapshots in the prompt. Add no outside claims, numbers, names, dates or context from memory. If a fact you need is not in the claims, leave it out and, when it matters, list it in open_questions.
+- Use ONLY the claims and snapshots in the prompt. Add no outside claims, numbers, names, dates or context from memory. If a fact you need is not in the claims, leave it out and, when it matters, list it in research_gaps (not in open_questions).
 - Every statement in a headline, body, layer, starting fact or steelman must be supported by the evidence quotes of the sources that item cites. Use read_source on a claim's snapshot_id when you need a longer or different verbatim passage from the same source.
 - Confidence: "established" only when a court_record, official or primary source supports it and it is not contested. With only news or analysis sources it is at most "reported". When it rests on one party's assertion it is "alleged". When credible sources conflict it is "disputed". Never label a fact stronger than the claims behind it.
 - Say it in the words too: "prosecutors allege", "the company denies", "according to the lawsuit".
-- Write for readers. User-facing copy never mentions the research process ("the opened text", "the sources opened for this dive"); put such limits in open_questions or in resolutions. Draw no inferences the sources do not state: no computed deadlines, totals or motives.
+- Write for readers. User-facing copy never mentions the research process ("the opened text", "the sources opened for this dive"); put such limits in open_questions or in resolutions. Draw no inferences the sources do not state: no computed deadlines, totals or motives. Anything described as pending, undecided or upcoming must rest on a source dated close to the as-of date; otherwise say it as of that source's date ("as of Sept. 30, the motion was under advisement"). Never say when something will be decided unless a source says so.
 - Order is identical for every reader. Interleave the sides so that no side's strongest (high impact) facts are bunched at the end, and do not end on one side's strongest fact. Keep the number of steps per side roughly even when the research allows. Fairness is not false balance: do not inflate a side the record does not support; say so in a resolution instead.
 - Copy fields are short: headline 160 characters, body 1000, quote layer 1200, steelman 2000, open question 400.
 
 Revising:
 - With a previous draft and critique: revise that draft. Keep the ids of steps that survive, and renumber order to match position. Address each critique item the claims allow: reword loaded language, fix confidence labels, correct or cut unsupported text, reorder steps, and add steps from new claims that close gaps.
 - With a base version and admin notes: apply the notes to the base version and change nothing else unless a note requires it.
-- resolutions: one entry per critique item, gap or admin note you handled. ref is the hard question id, red-team flag id or gap id, "fact_check:<target>" for a fact-check row, or "admin" for the admin's notes. resolution says what you changed, or why you could not address it (for example, no opened source covers it).
+- resolutions: one entry per critique item, gap or admin note you handled. ref is the hard question id, red-team flag id or gap id, "fact_check:<target>" for a fact-check row, or "admin" for the admin's notes. action: "changed" when you changed the draft to answer it; "not_changed" when you left the draft as it is (say why); "needs_admin" when it cannot be settled from the opened sources or is the admin's call; "not_applicable" when it does not apply. resolution says what you changed, or why you did not (for example, no opened source covers it). Never mark an item "changed" unless the draft changed for it.
 
 Live updates (the prompt has an <update> block): the draft is the next version of a published case, and the admin reviews it as a diff against the live version.
 - Start from the base version and change only what the new developments require. Keep every starting fact, step, depth layer, side, open question and source that no development changes exactly as it is, with the same id and the same evidence: unchanged facts must show as unchanged in the diff.
@@ -131,9 +132,9 @@ Live updates (the prompt has an <update> block): the draft is the next version o
 - open_questions: remove each one a new claim answers, and state the answer in a step that cites that claim; keep the others word for word; add one when a development raises a new unknown.
 - Change starting_facts and steelmen only when a development changes them.
 - Place new steps where they belong in the story, keeping the order rules above (spread each side's strongest facts; do not end on one side's strongest fact), and renumber order 1..n.
-- resolutions: one entry per development (ref is its claim id) saying which step it went into, or why it was left out; one per retired step (ref is the step id); one per resolved open question (ref "open_question").
+- resolutions: one entry per development (ref is its claim id, action "changed" when it went into a step, else "not_changed") saying which step it went into, or why it was left out; one per retired step (ref is the step id, action "changed"); one per resolved open question (ref "open_question", action "changed").
 - Inside the critic loop the previous draft already carries these changes: keep them while you answer the critique.
-- In the critic loop, change a fact that no development touches only for a blocking finding on it: a fact-check failure, a high-severity red-team flag, or a blocking hard question or gap. For any other critique of an unchanged fact, leave the fact exactly as it is and say in that item's resolution that it is left for the admin. The live version was reviewed; the update's diff should show the developments, not rewording.`;
+- In the critic loop, change a fact that no development touches only for a blocking finding on it: a fact-check failure, a high-severity red-team flag, or a blocking hard question or gap. For any other critique of an unchanged fact, leave the fact exactly as it is and give that item action "needs_admin" with a resolution saying it is left for the admin. The live version was reviewed; the update's diff should show the developments, not rewording.`;
 
 const drafter: AgentSpec<DrafterInput, DrafterOutput> = {
   name: 'drafter',
@@ -167,6 +168,12 @@ const drafter: AgentSpec<DrafterInput, DrafterOutput> = {
       );
     }
     parts.push(`Claims from the researchers (${input.claims.length}). Use only these:`, block('claims', input.claims));
+    if (input.research_gaps?.length) {
+      parts.push(
+        'What the researchers looked for and could not find or verify (research gaps: name them in research_gaps when the dive needs them; they are not open questions unless the public record itself does not know):',
+        block('research_gaps', input.research_gaps),
+      );
+    }
     if (input.opened?.length) parts.push('Sources opened in this run:', block('opened', input.opened));
     if (input.base) parts.push(`Base version ${input.base.version}:`, block('base', draftOnly(input.base)));
     if (input.instructions?.trim()) {

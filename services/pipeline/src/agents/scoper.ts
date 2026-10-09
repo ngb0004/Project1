@@ -56,14 +56,14 @@ export type ScoperOutput = Outline;
 
 const METHOD = `
 How to work:
-1. Run a few WebSearch queries and open 2 to 5 solid sources (court records, official statements, major outlets) with open_source to learn what the story is and where it stands now. Stop there: the researchers do the deep work.
-2. question.prompt: ONE question every reader can answer on a 0 to 100 slider. Prefer the form "How responsible is X for Y?". Use another measurable form, such as "How strong is the evidence that X?", only when responsibility does not fit. Name one actor or decision and one outcome, use plain neutral words, and do not presume the answer.
+1. Run a few WebSearch queries and open 2 to 5 solid sources (court records, official statements, major outlets) with open_source to learn what the story is and where it stands now. Then run a recency sweep before you finish: search for the newest developments (for example "<subject> <this month and year>", "<subject> <last month and year>", "<subject> judge rules", "<subject> latest") and open the newest dated report you find, so the outline does not stop at an older stage of the story. Stop there: the researchers do the deep work.
+2. question.prompt: ONE question every reader can answer on a 0 to 100 slider. Prefer the form "How responsible is X for Y?". Use another measurable form, such as "How strong is the evidence that X?", only when responsibility does not fit. Name one actor or decision and one outcome, use plain neutral words, and do not presume the answer. When the law puts the burden of proof on one party (for example the prosecution in a criminal trial), word the question around what that party must prove, or in burden-neutral terms; never frame it so that readers assume the other side must prove its case.
 3. question.left_label is the 0 end and question.right_label the 100 end: two to four plain words each, symmetric, with no loaded terms (for example "Not responsible" and "Fully responsible").
 4. sides: 2 or 3 positions that real people hold on that question. Each has an id (lowercase words joined by "-", such as "council-responsible"; never "neutral"), a label of a few plain words, and a position: one or two sentences giving the side's view as its own supporters put it, attributed, not endorsed.
 5. must_answer: 5 to 12 concrete questions a fair dive has to answer for a skeptic on every side: what happened and when, who decided what, what the records show, what is disputed, what is still unknown.
 6. content_warning: one short plain sentence when the case involves the death or abuse of a child, sexual violence, suicide, graphic violence or similar; otherwise null.
-7. timeline: the key dated events from the sources you opened, oldest first, each with the snapshot_id it came from. Log each one with log_claim.
-8. notes: what downstream agents must respect: minors or private individuals not to name, parts of the record that are sealed or contested, charges that are still allegations, words that are loaded for one side.
+7. timeline: the key dated events from the sources you opened, oldest first, each with the snapshot_id it came from, ending with the newest dated development the recency sweep found. Log each one with log_claim.
+8. notes: what downstream agents must respect: minors or private individuals not to name, parts of the record that are sealed or contested, charges that are still allegations, words that are loaded for one side, and the newest development you found with its date ("newest development found: ...").
 9. title: a plain, neutral name for the case (at most 160 characters). slug: the title as lowercase words joined by "-" (at most 80 characters).
 10. Labels, positions and notes follow house style too: plain words and no judging words (such as "clearly" or "shocking"), even when you paraphrase a side. Attribute each position to who holds it ("the defense argues", "prosecutors say"), not to unnamed "observers".
 
@@ -113,6 +113,13 @@ const clipText = (s: string, max: number) => (s.length > max ? `${s.slice(0, max
 
 /** Most must-answer items an outline carries (the Outline schema allows 15). */
 export const MAX_MUST_ANSWER = 15;
+
+/**
+ * A must-answer item every new case gets: where the story stands on the as-of
+ * date, so a draft cannot stop at an older stage of it.
+ */
+export const statusItem = (asOf: string) =>
+  `What is the status of the case as of ${asOf}, and does the draft report the newest development any opened source describes, with its date (and nothing as pending that a newer source shows was decided)?`;
 
 /** The generic first must-answer item of a live update, before the researchers have reported. */
 export const updateDevelopmentsItem = (since: string) =>

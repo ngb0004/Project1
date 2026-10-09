@@ -107,8 +107,7 @@ const words = (s: string | undefined) => (s?.trim() ? s.trim().split(/\s+/).leng
  * source it cites. The hand-written fixture cites sources without quoting
  * them, and the pipeline's citation check fails any cited source with no
  * evidence quote (a pipeline-built or hand-checked case, like the Cornell
- * seed, has one for each). The quote layer's speaker also loses its
- * "(fictional)" note, which the quote-layer check fails. Nothing else changes.
+ * seed, has one for each). Nothing else changes.
  */
 function liveFixture(): Case {
   const doc = structuredClone(loadFixture('fixture-harbor-bridge'));
@@ -125,8 +124,6 @@ function liveFixture(): Case {
   };
   for (const f of doc.starting_facts) f.evidence = [...(f.evidence ?? []), ...(evidence[`fact:${f.id}`] ?? [])];
   for (const st of doc.steps) st.evidence = [...(st.evidence ?? []), ...(evidence[st.id] ?? [])];
-  // The citation check holds a quote layer's speaker to a name and role, with no note in parentheses.
-  for (const st of doc.steps) for (const l of st.depth) if (l.kind === 'quote') l.speaker = l.speaker.replace(/\s*\([^)]*\)\s*$/, '');
   return doc;
 }
 const fixture = liveFixture();

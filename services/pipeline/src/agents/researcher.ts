@@ -16,6 +16,8 @@ export interface ResearcherInput {
   sinceAsOf?: string;
   /** Live updates: facts the live case already states, so they are not re-reported. */
   known_facts?: string[];
+  /** Live updates: what the live case lists as still unknown; a development may answer one. */
+  open_questions?: string[];
 }
 
 /** One fact taken from one opened source, with the verbatim quote that supports it. */
@@ -91,11 +93,26 @@ export function researchPromptSections(input: ResearcherInput, ctx: AgentContext
     parts.push('Targeted round. The critics found these gaps in the last draft; research them first:', block('gaps', input.gaps));
   }
   if (input.sinceAsOf) {
+    const since = input.sinceAsOf;
     parts.push(
-      `Live update. The published case is current as of ${input.sinceAsOf}. Look only for developments dated after ${input.sinceAsOf} and up to ${ctx.asOf}. ` +
-        'If nothing material is new, return an empty claims list and say so in summary.',
+      [
+        `Live update. The published case is current as of ${since}. Look only for developments dated after ${since} and up to ${ctx.asOf}: ` +
+          'new filings, rulings, verdicts or sentences, charges filed or dropped, official statements or reports, new evidence made public, ' +
+          'and corrections or retractions of facts the case states.',
+        `- Every claim carries the date of its development: event_date when the event happened after ${since}, or source_date when a source ` +
+          `published after ${since} makes something public for the first time. Claims dated on or before ${since}, or with no date, are dropped.`,
+        '- Do not re-report what the live case already states (known_facts below). A new article repeating an old fact is not a development.',
+        '- When a development changes or contradicts a fact the case states (a ruling replaces a pending motion, a figure is corrected), log the new fact and say in its text what it replaces.',
+        '- If nothing material is new, return an empty claims list, and say in summary what you searched and that nothing material was new.',
+      ].join('\n'),
     );
     if (input.known_facts?.length) parts.push('The live case already states these facts; do not re-report them:', block('known_facts', input.known_facts));
+    if (input.open_questions?.length) {
+      parts.push(
+        `The live case lists these questions as still open. If a development after ${since} answers one, log the claim that answers it:`,
+        block('open_questions', input.open_questions),
+      );
+    }
   }
   return parts;
 }

@@ -12,6 +12,7 @@ import {
   type ResearchLogRow,
   type SourceSnapshotMeta,
 } from '@sia/case-store';
+import { archiveFor } from './archive';
 import { checkCitations, type CitationFailure } from './factcheck';
 import { PIPELINE_LOG_AGENT, RECORDS_SCOPE } from './orchestrator';
 import { MemoryResearchLog, type LogKind, type SnapshotRecord } from './research/log';
@@ -41,6 +42,8 @@ export interface SourceAudit {
   /** The job's snapshot of this URL (requested or final URL), if any. */
   snapshot_id: string | null;
   http_status: number | null;
+  /** Revisions and updates: an earlier job's snapshot of it, from the version this one is based on. */
+  archived_snapshot_id?: string;
 }
 
 export type KindCounts = Partial<Record<LogKind, number>>;
@@ -145,16 +148,36 @@ export async function verifyJob(db: Db, jobId: string): Promise<JobAudit> {
     schemaWarnings = v.warnings;
     check('schema-valid', v.errors.length === 0, `${v.errors.length} errors, ${v.warnings.length} warnings`);
 
+    // A revision or update also has the archive: the snapshots earlier jobs took of the sources of the version it
+    // is based on. They back facts it left unchanged when a page changed since (src/archive.ts).
+    const archive = job.kind !== 'new_case' && caseId && row.based_on_version !== null ? await archiveFor(db, caseId, row.based_on_version, doc) : null;
+    if (archive) {
+      store.archive(archive.snapshots);
+      // Saved with the job's own snapshots, so `pipeline check` on a saved audit reads the same evidence.
+      snapshots.push(...archive.snapshots.filter((a) => !snapshots.some((x) => x.id === a.id)));
+    }
+
     for (const s of doc.sources) {
       const key = urlKey(s.url);
-      const snap = metas.find((m) => urlKey(m.url) === key || (m.final_url && urlKey(m.final_url) === key));
-      sources.push({ id: s.id, url: s.url, snapshot_id: snap?.id ?? null, http_status: snap?.http_status ?? null });
+      const usable = metas.filter((m) => (urlKey(m.url) === key || (m.final_url && urlKey(m.final_url) === key)) && m.http_status === 200);
+      const snap = usable[0] ?? metas.find((m) => urlKey(m.url) === key || (m.final_url && urlKey(m.final_url) === key));
+      const archived = archive?.snapshots.find((a) => urlKey(a.url) === key || urlKey(a.final_url) === key);
+      sources.push({
+        id: s.id,
+        url: s.url,
+        snapshot_id: snap?.id ?? null,
+        http_status: snap?.http_status ?? null,
+        ...(archived ? { archived_snapshot_id: archived.id } : {}),
+      });
     }
-    const missing = sources.filter((s) => s.snapshot_id === null || s.http_status !== 200);
+    const missing = sources.filter((s) => (s.snapshot_id === null || s.http_status !== 200) && !s.archived_snapshot_id);
+    const carried = sources.filter((s) => (s.snapshot_id === null || s.http_status !== 200) && s.archived_snapshot_id);
     check(
-      'every source opened by this job (HTTP 200 snapshot)',
+      archive?.jobIds.length ? 'every source opened by this job, or archived by the job that cited it' : 'every source opened by this job (HTTP 200 snapshot)',
       missing.length === 0,
-      `${sources.length - missing.length}/${sources.length}${missing.length ? `; missing: ${missing.map((m) => `${m.id} (${m.url})`).join(', ')}` : ''}`,
+      `${sources.length - missing.length - carried.length}/${sources.length} opened by this job` +
+        (carried.length ? `; ${carried.length} not usable now but archived: ${carried.map((m) => m.id).join(', ')}` : '') +
+        (missing.length ? `; missing: ${missing.map((m) => `${m.id} (${m.url})`).join(', ')}` : ''),
     );
 
     citationFailures = checkCitations(doc, store);
@@ -209,8 +232,10 @@ export async function verifyJob(db: Db, jobId: string): Promise<JobAudit> {
     `${Object.entries(logByScope).map(([k, c]) => `${k}: ${c.query ?? 0}q/${c.open ?? 0}o/${c.claim ?? 0}c`).join(', ')}${gaps.length ? `; missing: ${gaps.join(', ')}` : ''}`,
   );
   const finished = (a: string) => logRows.some((x) => x.agent === a && x.kind === 'note' && x.excerpt?.startsWith('Agent call finished'));
-  const silent = ALL_AGENTS.filter((a) => !finished(a));
-  check('every agent ran and logged its call', silent.length === 0, silent.length ? `no finished call from: ${silent.join(', ')}` : `${ALL_AGENTS.length} agents; plus ${logByAgent[PIPELINE_LOG_AGENT]?.note ?? 0} pipeline notes`);
+  // Revisions and updates take their outline from the existing case: no scoper call.
+  const agents = fresh ? ALL_AGENTS : ALL_AGENTS.filter((a) => a !== 'scoper');
+  const silent = agents.filter((a) => !finished(a));
+  check('every agent ran and logged its call', silent.length === 0, silent.length ? `no finished call from: ${silent.join(', ')}` : `${agents.length} agents; plus ${logByAgent[PIPELINE_LOG_AGENT]?.note ?? 0} pipeline notes`);
 
   return {
     ok: checks.every((c) => c.ok),

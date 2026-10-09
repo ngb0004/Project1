@@ -20,6 +20,12 @@ export interface Snapshot {
   sha256: string;
   text: string;
   fetchedAt: string;
+  /**
+   * Set for a snapshot an earlier job took of a source the base version cites
+   * (see `archive`): evidence for facts a revision or update leaves unchanged,
+   * not a page opened in this run.
+   */
+  archivedFrom?: { jobId: string };
 }
 
 export interface OpenResult {
@@ -118,10 +124,10 @@ export class SourceStore {
     };
   }
 
-  private remember(snapshot: Snapshot, urls: string[]): void {
+  private remember(snapshot: Snapshot, urls: string[], listed = true): void {
     if (!this.byId.has(snapshot.id)) {
       this.byId.set(snapshot.id, snapshot);
-      this.order.push(snapshot);
+      if (listed) this.order.push(snapshot);
     }
     for (const key of new Set(urls.filter(Boolean).map(urlKey))) {
       const list = this.byUrl.get(key) ?? [];
@@ -134,19 +140,55 @@ export class SourceStore {
     return this.byId.get(snapshotId);
   }
 
-  /** Every snapshot of this URL (matched on the requested or final URL), oldest first. */
+  /** Every snapshot of this URL (matched on the requested or final URL), archived ones first, then oldest first. */
   findAllByUrl(url: string): Snapshot[] {
     return [...(this.byUrl.get(urlKey(url)) ?? [])];
   }
 
-  /** The latest snapshot of this URL, if it was opened in this run. */
+  /** The latest snapshot of this URL: the one opened in this run, else an archived one. */
   findByUrl(url: string): Snapshot | undefined {
     const all = this.findAllByUrl(url);
     return all[all.length - 1];
   }
 
+  /** Snapshots taken in this run (not the archive). */
   opened(): Snapshot[] {
     return [...this.order];
+  }
+
+  /** The archived snapshots loaded with `archive`. */
+  archived(): Snapshot[] {
+    return [...this.byId.values()].filter((s) => s.archivedFrom);
+  }
+
+  /**
+   * Adds snapshots that earlier jobs took of the sources a base version cites.
+   * They back the evidence of facts a revision or update leaves unchanged when
+   * a page has changed since (a paywall, a removed article): the citation check
+   * and the critics can still read what was cited. They are not "opened in this
+   * run": `opened()` leaves them out, and claims cannot cite them.
+   */
+  archive(records: Array<SnapshotRecord & { job_id: string }>): number {
+    let n = 0;
+    for (const r of records) {
+      if (this.byId.has(r.id)) continue;
+      if (r.http_status !== 200 || r.text_content.length < MIN_TEXT_CHARS) continue;
+      const snap: Snapshot = {
+        id: r.id,
+        url: r.url,
+        finalUrl: r.final_url || r.url,
+        status: r.http_status,
+        contentType: r.content_type,
+        title: r.title,
+        sha256: r.sha256,
+        text: r.text_content,
+        fetchedAt: r.fetched_at,
+        archivedFrom: { jobId: r.job_id },
+      };
+      this.remember(snap, [snap.url, snap.finalUrl], false);
+      n++;
+    }
+    return n;
   }
 
   /** Adds snapshots saved earlier (e.g. a package directory), as `pipeline check` does. */

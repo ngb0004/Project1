@@ -65,7 +65,8 @@ export class FakeRunner implements AgentRunner {
   }
 
   async run<I, O>(spec: AgentSpec<I, O>, input: I, ctx: AgentContext, tools: ResearchTools, runOpts: RunOptions = {}): Promise<AgentRunResult<O>> {
-    void runOpts;
+    const signal = runOpts.signal;
+    if (signal?.aborted) throw new AgentRunError(`${spec.name} failed: aborted before it started`, spec.name, 0, 'aborted');
     const system = spec.system(ctx);
     if ((this.opts.requireStandards ?? true) && !system.includes(AGENT_STANDARDS)) {
       throw new AgentRunError(`the ${spec.name} system prompt does not include the agent standards`, spec.name);
@@ -91,7 +92,19 @@ export class FakeRunner implements AgentRunner {
       this.used.set(key, n + 1);
       step = script[Math.min(n, script.length - 1)] as FakeScript;
     }
-    const raw = typeof step === 'function' ? await (step as FakeScriptFn)(input, ctx, tools, call) : structuredClone(step);
+    // Like the SDK runner, an abort ends the call at once with reason "aborted", whatever the script is doing.
+    let onAbort: (() => void) | undefined;
+    const aborted = new Promise<never>((_, reject) => {
+      onAbort = () => reject(new AgentRunError(`${spec.name} failed: ${(signal?.reason as Error | undefined)?.message ?? 'aborted'}`, spec.name, 0, 'aborted'));
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+    aborted.catch(() => {});
+    let raw: unknown;
+    try {
+      raw = typeof step === 'function' ? await Promise.race([Promise.resolve((step as FakeScriptFn)(input, ctx, tools, call)), aborted]) : structuredClone(step);
+    } finally {
+      if (onAbort) signal?.removeEventListener('abort', onAbort);
+    }
     const parsed = spec.output.safeParse(raw);
     if (!parsed.success) {
       throw new AgentRunError(`${spec.name} (scripted) output does not match its schema: ${parsed.error.message}`, spec.name, 0, 'output');

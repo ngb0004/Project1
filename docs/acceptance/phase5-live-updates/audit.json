@@ -1,0 +1,354 @@
+{
+  "ok": true,
+  "checks": [
+    {
+      "name": "job succeeded",
+      "ok": true,
+      "detail": "status succeeded"
+    },
+    {
+      "name": "package in the review queue",
+      "ok": true,
+      "detail": "version 2 is in_review and in staff_queue"
+    },
+    {
+      "name": "schema-valid",
+      "ok": true,
+      "detail": "0 errors, 1 warnings"
+    },
+    {
+      "name": "every source opened by this job, or archived by the job that cited it",
+      "ok": true,
+      "detail": "31/31 opened by this job"
+    },
+    {
+      "name": "every quote verbatim in its snapshot",
+      "ok": true,
+      "detail": "187 quotes checked; 0 failures"
+    },
+    {
+      "name": "review: hard questions",
+      "ok": true,
+      "detail": "30 (30 with a resolution)"
+    },
+    {
+      "name": "review: a bias report for every side",
+      "ok": true,
+      "detail": "4 reports; sides without one: none"
+    },
+    {
+      "name": "review: fact-check table",
+      "ok": true,
+      "detail": "277 rows"
+    },
+    {
+      "name": "review: balance summary",
+      "ok": true,
+      "detail": "{\"criminally-responsible\":4,\"lacked-criminal-responsibility\":4}"
+    },
+    {
+      "name": "review: open issues listed",
+      "ok": true,
+      "detail": "3 open issues"
+    },
+    {
+      "name": "every snapshot matches its sha256",
+      "ok": true,
+      "detail": "56/56"
+    },
+    {
+      "name": "every logged open with a snapshot has its snapshot row",
+      "ok": true,
+      "detail": "35 opens (35 usable), 56 snapshots"
+    },
+    {
+      "name": "research agents logged queries, opens and claims",
+      "ok": true,
+      "detail": "researcher#criminally-responsible: 2q/2o/5c, researcher#lacked-criminal-responsibility: 4q/6o/11c, records_researcher#records: 2q/2o/4c"
+    },
+    {
+      "name": "every agent ran and logged its call",
+      "ok": true,
+      "detail": "7 agents; plus 8 pipeline notes"
+    }
+  ],
+  "caseId": "33f4243d-176a-40ee-a4f7-83cc1b06ddb2",
+  "version": 2,
+  "versionStatus": "in_review",
+  "schemaErrors": [],
+  "schemaWarnings": [
+    {
+      "path": "review.fact_check.237.target",
+      "code": "unknown_reference",
+      "message": "Fact-check row refers to unknown target \"layer:s11/q2\"."
+    }
+  ],
+  "citationFailures": [],
+  "quotesChecked": 187,
+  "sources": [
+    {
+      "id": "src-keita",
+      "url": "https://case-law.vlex.com/vid/com-v-keita-893336347",
+      "snapshot_id": "867acedf-da2a-459f-9ae0-f57240b036a0",
+      "http_status": 200,
+      "archived_snapshot_id": "f8a26147-1677-4359-a01d-7ecbe7415ed7"
+    },
+    {
+      "id": "src-wbur-insanity",
+      "url": "https://www.wbur.org/news/2026/09/01/massachusetts-lindsay-clancy-insanity-defense-criminal-liability",
+      "snapshot_id": "922044c4-9a0d-48c3-b8a0-79bc35564069",
+      "http_status": 200,
+      "archived_snapshot_id": "5d13d06a-ae32-4f46-9ce9-b9e6bedcd909"
+    },
+    {
+      "id": "src-da-indictment",
+      "url": "https://plymouthda.com/news/2023-press-releases/duxbury-woman-indicted-on-charges-that-she-murdered-her-three-children/",
+      "snapshot_id": "df65b781-7438-402c-9100-066a49cd08cf",
+      "http_status": 200,
+      "archived_snapshot_id": "9d68a2f5-4e95-4d9e-95f4-403bd75f1d20"
+    },
+    {
+      "id": "src-nbc-nolle",
+      "url": "https://www.nbcboston.com/news/local/prosecutors-drop-redundant-charges-against-lindsay-clancy-ahead-of-trial/3979152/",
+      "snapshot_id": "1db2573d-845b-45e7-b377-b47befae23b3",
+      "http_status": 200,
+      "archived_snapshot_id": "a58f1003-db55-48e3-ba9c-70b52320a900"
+    },
+    {
+      "id": "src-wpri",
+      "url": "https://www.wpri.com/new-england/massachusetts/duxbury-mom-offers-to-admit-to-killing-her-3-kids-if-judge-splits-trial/amp/",
+      "snapshot_id": "480a1f11-e8ea-4d55-bec2-a29dce8e52a2",
+      "http_status": 200,
+      "archived_snapshot_id": "5e7e8a98-54f6-4603-b91d-6c60b1c219db"
+    },
+    {
+      "id": "src-globe-april",
+      "url": "https://www.bostonglobe.com/2026/04/07/metro/lindsay-clancy-admit-killing-children/",
+      "snapshot_id": "b547985d-517d-4a33-879c-7fc445efc1d2",
+      "http_status": 200,
+      "archived_snapshot_id": "1ec70cf5-ffa6-47ed-96e5-ddf1d3c60b9a"
+    },
+    {
+      "id": "src-kutv-aug4",
+      "url": "https://kutv.com/news/nation-world/testimony-continues-in-the-lindsay-clancy-murder-trial-aug-4-2026",
+      "snapshot_id": "43ca0885-688e-48b3-bd02-153b8fe304b3",
+      "http_status": 200,
+      "archived_snapshot_id": "d5b6172a-c64f-4952-a1da-83d520ff12f0"
+    },
+    {
+      "id": "src-wbur-929",
+      "url": "https://www.wbur.org/news/2026/09/29/lindsay-clancy-hearing-retrial-motion-to-dismiss",
+      "snapshot_id": "82ebdf7f-0c83-4d4a-bc54-c8881a69b449",
+      "http_status": 200,
+      "archived_snapshot_id": "1551f648-0556-4c36-9c13-063900042c70"
+    },
+    {
+      "id": "src-globe-resnick",
+      "url": "https://www.bostonglobe.com/2026/08/21/metro/lindsay-clancy-trial-mack-resnick/",
+      "snapshot_id": "684f45fd-ae01-4a33-85ff-203e41c7b672",
+      "http_status": 200,
+      "archived_snapshot_id": "a60b758f-8a50-462d-9290-11794c71a49d"
+    },
+    {
+      "id": "src-foxla",
+      "url": "https://www.foxla.com/news/lindsay-clancy-trial-jurors-hear-conflicting-expert-testimony-mothers-mental-state",
+      "snapshot_id": "6b87f701-8712-4dd2-bfb8-51998336743a",
+      "http_status": 200,
+      "archived_snapshot_id": "913f90c8-d288-4407-bc4a-b7cbc24c1fc7"
+    },
+    {
+      "id": "src-globe-motion",
+      "url": "https://www.bostonglobe.com/2026/09/10/metro/lindsay-clancy-motion-acquittal-retrial/",
+      "snapshot_id": "423b64fc-b096-42f0-9544-7937ce34e217",
+      "http_status": 200,
+      "archived_snapshot_id": "6fbc914f-8590-44c0-abad-8d7d0391b53c"
+    },
+    {
+      "id": "src-bostoncom-malpractice",
+      "url": "https://www.boston.com/news/crime/2026/01/27/lindsay-clancy-malpractice-lawsuit/",
+      "snapshot_id": "49cb5521-2863-42cc-91f4-95690a624559",
+      "http_status": 200,
+      "archived_snapshot_id": "37c4e43a-b6c2-4b24-a177-644ede0673e1"
+    },
+    {
+      "id": "src-wfsb",
+      "url": "https://www.wfsb.com/2026/08/12/lindsay-clancy-repeatedly-asked-change-medications-psychiatric-nurse-says/",
+      "snapshot_id": "ee7bf9e7-9e7a-456d-b198-30400f772190",
+      "http_status": 200,
+      "archived_snapshot_id": "68231631-66f9-4270-a328-8a8f1bd2c805"
+    },
+    {
+      "id": "src-fox9",
+      "url": "https://www.fox9.com/news/members-lindsay-clancy-jury-open-up-holdout-juror",
+      "snapshot_id": "f1085373-8513-43fd-957b-a38efb769117",
+      "http_status": 200,
+      "archived_snapshot_id": "0a0542b6-404e-464a-82d2-a25046dfb0de"
+    },
+    {
+      "id": "src-wbur-closing",
+      "url": "https://www.wbur.org/news/2026/08/26/lindsay-clancy-murder-trial-testimony-closing-arguments",
+      "snapshot_id": "dfc78a21-3cbc-4374-9c21-89971d46e6df",
+      "http_status": 200,
+      "archived_snapshot_id": "1be9daa9-00ee-4889-96f0-a8d10845454e"
+    },
+    {
+      "id": "src-katv",
+      "url": "https://katv.com/news/nation-world/lindsay-clancy-murder-trial-continues-following-autopsy-testimony-aug-7-2026",
+      "snapshot_id": "552605c7-03d3-4d53-92a9-697fb6e1957b",
+      "http_status": 200,
+      "archived_snapshot_id": "183d24ff-cdc5-454d-a56d-c536797a1a13"
+    },
+    {
+      "id": "src-washex",
+      "url": "https://www.washingtonexaminer.com/news/crime/4714008/lindsay-clancy-verdict-mistrial/",
+      "snapshot_id": "b11f0ac2-7f1a-4930-bc88-54b7e9b75601",
+      "http_status": 200,
+      "archived_snapshot_id": "e520b045-c654-42ef-825f-bff8bcf86b15"
+    },
+    {
+      "id": "src-fox29",
+      "url": "https://www.fox29.com/news/lindsay-clancy-trial-juror-who-blocked-lindsay-clancy-verdict-disputes-fellow-jurors-claims-report",
+      "snapshot_id": "178946bc-7bad-42da-a4d4-786a9b9af307",
+      "http_status": 200,
+      "archived_snapshot_id": "b9e4add3-03b4-4db1-901b-039418a1f72a"
+    },
+    {
+      "id": "src-massbrief",
+      "url": "https://buttondown.com/massbrief/archive/the-mass-brief-lindsay-clancy-is-back-in-court/",
+      "snapshot_id": "f6859d9a-fe37-46b3-a1c6-d02cb662e3e3",
+      "http_status": 200,
+      "archived_snapshot_id": "fd85ccba-42e1-4c71-9a44-45fc741fbccf"
+    },
+    {
+      "id": "src-bostoncom-dj",
+      "url": "https://www.boston.com/news/crime/2026/09/22/lindsay-clancy-motion-to-dismiss-double-jeopardy/",
+      "snapshot_id": "0b51abb4-5ffc-4d34-a484-cf66c578abd9",
+      "http_status": 200,
+      "archived_snapshot_id": "a5198914-58dc-4a90-a07c-f9ee589c89a9"
+    },
+    {
+      "id": "src-wbur-sept4",
+      "url": "https://www.wbur.org/news/2026/09/04/massachusetts-lindsay-clancy-day-7-jury-court-murder-trial",
+      "snapshot_id": "3a595257-7161-42f1-80da-cf87b2060f81",
+      "http_status": 200,
+      "archived_snapshot_id": "fac4af1f-a9f5-4b07-b6d7-afbf6f4a1298"
+    },
+    {
+      "id": "src-nbc-jurors",
+      "url": "https://www.nbcboston.com/news/local/lindsay-clancy-jurors-speak-about-deliberations-hold-out-juror/4011580/",
+      "snapshot_id": "d3675ce5-d751-4d1a-a41e-bca73b168a06",
+      "http_status": 200,
+      "archived_snapshot_id": "4bc1735b-0164-4c06-989d-bd2da563f5cc"
+    },
+    {
+      "id": "src-bostoncom-civil",
+      "url": "https://www.boston.com/news/crime/2026/09/10/lindsay-clancy-patrick-clancy-civil-lawsuits/",
+      "snapshot_id": "7a3a0ea0-2424-4075-a727-6466c225b565",
+      "http_status": 200,
+      "archived_snapshot_id": "770dad4a-f592-45a3-a4b6-307e4a589ae7"
+    },
+    {
+      "id": "src-nbc-bifurcation",
+      "url": "https://www.nbcboston.com/news/local/lindsay-clancy-murder-case-judge-issues-key-ruling/3925435/",
+      "snapshot_id": "835e574e-bb71-406b-8bad-5abaa9a97c2e",
+      "http_status": 200,
+      "archived_snapshot_id": "e22b1760-86f9-43c9-a159-4a83679b14a8"
+    },
+    {
+      "id": "src-kutv",
+      "url": "https://kutv.com/news/nation-world/lindsay-clancy-due-back-in-court-as-question-of-retrial-remains-unanswered-sept-29-2026",
+      "snapshot_id": "e2dd65d9-5e5f-415c-b77c-28768e9c64e8",
+      "http_status": 200,
+      "archived_snapshot_id": "12b78265-eec9-46ad-aca8-0df9268d5d22"
+    },
+    {
+      "id": "src-cnn-oct1",
+      "url": "https://www.cnn.com/2026/10/01/us/lindsay-clancy-case-update",
+      "snapshot_id": "e4174ec2-2267-474d-a60d-a9b3068611cc",
+      "http_status": 200
+    },
+    {
+      "id": "src-wbur-oct1",
+      "url": "https://www.wbur.org/news/2026/10/01/lindsay-clancy-not-guilty-defense-motion-denied",
+      "snapshot_id": "0160e150-9b87-4609-b28a-3aa5eb7eaa99",
+      "http_status": 200
+    },
+    {
+      "id": "src-boston25",
+      "url": "https://www.boston25news.com/news/local/judge-denies-lindsay-clancys-motion-required-finding-not-guilty-murder-case/SBD6XSIPOFCZDD4M7S6NHAR53E/",
+      "snapshot_id": "bdc13428-6ed4-456d-9c78-cb5ca474c3dd",
+      "http_status": 200
+    },
+    {
+      "id": "src-boston25-live",
+      "url": "https://www.boston25news.com/news/local/lindsay-clancy-live-updates-trial-enters-4th-week-testimony/GS4743ZE7FBALCAAEY7VXSMUJ4/",
+      "snapshot_id": "eb92ad46-caf0-4347-a3fb-58f31ebdf9bb",
+      "http_status": 200
+    },
+    {
+      "id": "src-boston25-2023",
+      "url": "https://www.boston25news.com/news/local/chilling-timeline-lindsey-clancy-accused-planning-murders-her-3-children-prosecutor-says/KD7EMDB7OFGONMBPVSM6E7GVEM/",
+      "snapshot_id": "b6d94974-c628-4094-b29e-95e96ecb8c1f",
+      "http_status": 200
+    },
+    {
+      "id": "src-foxnews",
+      "url": "https://www.foxnews.com/us/lindsay-clancy-prosecutors-squeeze-timeline-ex-husband-jury-weighs-murder-versus-madness-expert.amp",
+      "snapshot_id": "16859b2b-d6b0-4485-b992-3e149742588d",
+      "http_status": 200
+    }
+  ],
+  "logByAgent": {
+    "pipeline": {
+      "note": 8,
+      "open": 25
+    },
+    "researcher": {
+      "query": 6,
+      "open": 8,
+      "claim": 16,
+      "note": 4
+    },
+    "records_researcher": {
+      "query": 2,
+      "open": 2,
+      "claim": 4,
+      "note": 1
+    },
+    "drafter": {
+      "note": 4
+    },
+    "red_team": {
+      "note": 8
+    },
+    "hard_questions": {
+      "note": 2
+    },
+    "fact_checker": {
+      "note": 4
+    },
+    "editor": {
+      "note": 1
+    }
+  },
+  "logByScope": {
+    "researcher#criminally-responsible": {
+      "query": 2,
+      "open": 2,
+      "claim": 5,
+      "note": 1
+    },
+    "researcher#lacked-criminal-responsibility": {
+      "query": 4,
+      "open": 6,
+      "claim": 11,
+      "note": 3
+    },
+    "records_researcher#records": {
+      "query": 2,
+      "open": 2,
+      "claim": 4,
+      "note": 1
+    }
+  }
+}

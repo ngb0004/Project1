@@ -1,6 +1,8 @@
 import {
   Case as CaseSchema,
   computeBalance,
+  deepEqual,
+  diffCases,
   normalizeCase,
   toBalanceSummary,
   validateCase,
@@ -20,8 +22,9 @@ import hardQuestionsSpec, { type HardQuestionItem, type HardQuestionsInput, type
 import recordsResearcherSpec from './agents/recordsResearcher';
 import redTeamSpec, { type RedTeamFlag, type RedTeamInput, type RedTeamOutput } from './agents/redTeam';
 import researcherSpec, { type ResearchClaim, type ResearchOutput, type ResearcherInput } from './agents/researcher';
-import scoperSpec, { outlineFromCase, type Outline, type OutlineSide, type ScoperInput } from './agents/scoper';
+import scoperSpec, { MAX_MUST_ANSWER, developmentItem, outlineFromCase, updateDevelopmentsItem, type Outline, type OutlineSide, type ScoperInput } from './agents/scoper';
 import type { Critiques, DraftCase, Gap, GapInput, OpenedSourceRef, SourceSnapshotRef } from './agents/shared';
+import { bestSnapshot, describeDrift, quotesBySource, sourceDrift, type ArchivedSnapshot } from './archive';
 import type { AgentContext, AgentSpec } from './agents/types';
 import { checkCitations, failureKey, type CitationFailure } from './factcheck';
 import type { LogSummary } from './research/log';
@@ -29,6 +32,17 @@ import type { SourceStore } from './research/store';
 import { matchQuote, urlKey } from './research/text';
 import { ResearchTools } from './research/tools';
 import { AgentRunError, type AgentRunResult, type AgentRunner } from './runner/types';
+import {
+  changesBeyondAsOf,
+  describeScreening,
+  developmentDate,
+  knownFactsOf,
+  screenDevelopments,
+  updateSummaryText,
+  type ScreenedDevelopments,
+} from './update';
+
+export { isAfter } from './update';
 
 /**
  * The research pipeline: scoper -> researchers (one per side, plus the records
@@ -46,7 +60,13 @@ import { AgentRunError, type AgentRunResult, type AgentRunner } from './runner/t
 export type PipelineRequest =
   | { kind: 'new_case'; brief: string }
   | { kind: 'revision'; base: Case; instructions: string }
-  | { kind: 'update'; live: Case };
+  /**
+   * A live update. `pending` is the pipeline's update package already waiting
+   * for review on top of `live`, if there is one: the update then builds on it
+   * (researching only what is new since its as-of date) and replaces it in the
+   * queue, so the admin always reviews one current package against `live`.
+   */
+  | { kind: 'update'; live: Case; pending?: Case };
 
 export interface PipelineAgents {
   scoper: AgentSpec<ScoperInput, Outline>;
@@ -86,6 +106,12 @@ export interface PipelineDeps {
   maxRounds?: number;
   /** Spend cap for the whole run, in USD. */
   budgetUsd?: number;
+  /**
+   * Revisions and updates: snapshots earlier jobs took of the base version's
+   * sources (see src/archive.ts). They back the facts the run leaves unchanged
+   * when a page has changed since it was cited.
+   */
+  archive?: ArchivedSnapshot[];
   signal?: AbortSignal;
   onProgress?: (message: string) => void;
 }
@@ -105,10 +131,24 @@ export interface ResearchLogDigest extends LogSummary {
   opened: OpenedSourceSummary[];
 }
 
+/** What a live update package is, for the worker's job result and the review record. */
+export interface UpdateInfo {
+  live_version: number;
+  /** The version the draft started from (the live version, or the update package it replaces). */
+  base_version: number;
+  /** Developments are dated after this date (the base version's as-of date). */
+  since: string;
+  developments: { id: string; text: string; url: string; publisher: string; date: string | null }[];
+  /** The plain update summary also recorded as the editor's `update` report in the review record. */
+  summary: string;
+}
+
 export interface PipelinePackage {
   kind: 'package';
   runId: string;
   request: PipelineRequest['kind'];
+  /** Set for live updates. */
+  update?: UpdateInfo;
   /** The case with its review record, ready for submit_case_package. */
   case: Case;
   review: ReviewRecord;
@@ -125,7 +165,11 @@ export interface PipelinePackage {
 export interface NoChangesResult {
   kind: 'no_changes';
   runId: string;
+  /** Why nothing was submitted, in plain words (also written to the research log). */
   summary: string;
+  /** The version the update researched against, and the date developments had to come after. */
+  baseVersion?: number;
+  since?: string;
   researchLog: ResearchLogDigest;
   costUsd: number;
 }
@@ -183,12 +227,6 @@ export function toLocalId(raw: string, fallback = 'x'): string {
     .replace(/^[^a-z0-9]+/, '')
     .slice(0, 64);
   return id || fallback;
-}
-
-/** Whether a (possibly partial) date can fall after `asOf`. */
-export function isAfter(date: string | null | undefined, asOf: string): boolean {
-  if (!date) return false;
-  return date > asOf.slice(0, date.length) || (date.length < asOf.length && date === asOf.slice(0, date.length));
 }
 
 /** Every source id a draft cites anywhere. */
@@ -267,6 +305,12 @@ class PipelineRun {
   private readonly issues: Omit<OpenIssue, 'id'>[] = [];
   private outline!: Outline;
   private base: Case | undefined;
+  /** Live updates: the live version, the screened research, and the drafter's resolutions by ref. */
+  private live: Case | undefined;
+  private screening: ScreenedDevelopments | undefined;
+  private readonly resolutions = new Map<string, string>();
+  /** Researcher calls that failed, as "scope: message". */
+  private readonly researchFailures: string[] = [];
 
   constructor(private readonly deps: PipelineDeps) {
     this.agents = deps.agents ?? DEFAULT_AGENTS;
@@ -373,7 +417,11 @@ class PipelineRun {
   // Research
   // -------------------------------------------------------------------------
 
-  private async research(round: number, jobs: { side?: OutlineSide; gaps?: GapInput[] }[], update?: { sinceAsOf: string; knownFacts: string[] }) {
+  private async research(
+    round: number,
+    jobs: { side?: OutlineSide; gaps?: GapInput[] }[],
+    update?: { sinceAsOf: string; knownFacts: string[]; openQuestions: string[] },
+  ) {
     const toolsOf = new Map<number, ResearchTools>();
     const results = await Promise.allSettled(
       jobs.map((job, i) => {
@@ -383,7 +431,9 @@ class PipelineRun {
           outline: this.outline,
           ...(job.side ? { side: job.side } : {}),
           ...(job.gaps?.length ? { gaps: job.gaps } : {}),
-          ...(update ? { sinceAsOf: update.sinceAsOf, known_facts: update.knownFacts } : {}),
+          ...(update
+            ? { sinceAsOf: update.sinceAsOf, known_facts: update.knownFacts, ...(update.openQuestions.length ? { open_questions: update.openQuestions } : {}) }
+            : {}),
         };
         return this.call(spec, input, round, {
           scope,
@@ -401,6 +451,7 @@ class PipelineRun {
         failures++;
         const msg = (r.reason as Error).message;
         if (r.reason instanceof BudgetExhaustedError || r.reason instanceof PipelineError) throw r.reason;
+        this.researchFailures.push(`${scope} (round ${round}): ${msg}`);
         const salvaged = this.salvageClaims(toolsOf.get(i), scope, round);
         this.issues.push({
           source: 'pipeline',
@@ -471,7 +522,7 @@ class PipelineRun {
     const dropped: string[] = [];
     for (const c of claims) {
       const snap = this.store.get(c.snapshot_id);
-      if (!snap) {
+      if (!snap || snap.archivedFrom) {
         dropped.push(`${c.id}: snapshot ${c.snapshot_id} was not taken in this run`);
         continue;
       }
@@ -499,8 +550,10 @@ class PipelineRun {
     return this.store.opened().map((s) => ({ snapshot_id: s.id, url: s.url, final_url: s.finalUrl, title: s.title, fetched_at: s.fetchedAt }));
   }
 
+  /** Each cited source with the snapshot the critics should read: one that still has every passage the draft quotes. */
   private sourceRefs(c: DraftCase): SourceSnapshotRef[] {
-    return c.sources.map((s) => ({ source_id: s.id, snapshot_id: this.store.findByUrl(s.url)?.id ?? null, url: s.url }));
+    const quotes = quotesBySource(c);
+    return c.sources.map((s) => ({ source_id: s.id, snapshot_id: bestSnapshot(this.store, s.url, quotes.get(s.id) ?? [])?.id ?? null, url: s.url }));
   }
 
   /** Revisions and updates cite the base version's sources: open each again so it counts as opened in this run. */
@@ -511,6 +564,27 @@ class PipelineRun {
     await this.note(
       `Re-opened ${urls.length} source(s) of version ${base.version}: ${urls.length - failed.length} usable` +
         (failed.length ? `; not usable: ${failed.map((f) => `${f.url} (${f.error})`).join('; ')}` : '.'),
+      0,
+      'base_sources',
+    );
+    // A page that no longer says what the case quotes (a paywall, an edit, a removal) does not make the
+    // unchanged facts wrong: they are checked against the archived snapshot, and the admin is told.
+    for (const d of sourceDrift(base, this.store)) {
+      const text = describeDrift(d, base.version);
+      await this.note(text, 0, 'base_sources');
+      this.issues.push({ source: 'pipeline', severity: 'medium', description: clip(text, 2000), resolved: false });
+    }
+  }
+
+  /** Loads the base version's archived snapshots into the store, before anything is opened. */
+  private async loadArchive(base: Case) {
+    const records = this.deps.archive ?? [];
+    if (!records.length) return;
+    const n = this.store.archive(records);
+    const jobs = [...new Set(records.map((r) => r.job_id.slice(0, 8)))];
+    await this.note(
+      `Loaded ${n} archived snapshot(s) of version ${base.version}'s sources (from job(s) ${jobs.join(', ')}): evidence for the facts this run ` +
+        'leaves unchanged if a page has changed since it was cited. They are not counted as opened in this run.',
       0,
       'base_sources',
     );
@@ -527,7 +601,8 @@ class PipelineRun {
       c.id = this.base.id;
       c.slug = this.base.slug;
       c.version = this.base.version + 1;
-      const parent = this.base.status === 'published' ? this.base.version : this.base.parent_version;
+      // An update always updates the live version, even when it builds on the update package in review.
+      const parent = this.live ? this.live.version : this.base.status === 'published' ? this.base.version : this.base.parent_version;
       if (parent !== undefined) c.parent_version = parent;
       else delete c.parent_version;
     } else {
@@ -538,7 +613,15 @@ class PipelineRun {
     }
     c.status = 'draft';
     c.as_of = this.asOf;
+    // A source the base version already lists keeps its access time (the run re-opened it to check it, and the
+    // diff should not show every source as changed); a new source gets the fetch time of its snapshot.
+    const baseSources = new Map((this.base?.sources ?? []).map((s) => [s.id, s]));
     for (const s of c.sources) {
+      const prev = baseSources.get(s.id);
+      if (prev && urlKey(prev.url) === urlKey(s.url) && this.store.findByUrl(s.url)) {
+        s.accessed_at = prev.accessed_at;
+        continue;
+      }
       const snap = this.store.findByUrl(s.url);
       if (snap) s.accessed_at = snap.fetchedAt;
     }
@@ -755,9 +838,16 @@ class PipelineRun {
           this.cost,
         );
       }
+    } else if (request.kind === 'revision') {
+      this.base = request.base;
+      this.outline = outlineFromCase(this.base, { instructions: request.instructions });
+      await this.loadArchive(this.base);
     } else {
-      this.base = request.kind === 'revision' ? request.base : request.live;
-      this.outline = outlineFromCase(this.base, request.kind === 'revision' ? { instructions: request.instructions } : { sinceAsOf: request.live.as_of });
+      // A live update starts from the live version, or from the update package already in review on top of it.
+      this.live = request.live;
+      this.base = request.pending ?? request.live;
+      this.outline = outlineFromCase(this.base, { sinceAsOf: this.base.as_of });
+      await this.loadArchive(this.base);
     }
 
     // 2. Research: one researcher per side plus the records researcher, in parallel.
@@ -770,18 +860,8 @@ class PipelineRun {
       const notes = request.instructions.trim();
       await this.research(0, allJobs(notes ? [{ id: 'admin', description: `The admin asked for these changes: ${notes}`, blocking: true }] : undefined));
     } else {
-      const live = request.live;
-      const knownFacts = [...live.starting_facts.map((f) => f.text), ...live.steps.map((s) => s.headline)];
-      const fresh = await this.research(0, allJobs(), { sinceAsOf: live.as_of, knownFacts });
-      const material = fresh.filter((c) => c.impact !== 'low' && (isAfter(c.source_date, live.as_of) || isAfter(c.event_date, live.as_of)));
-      if (material.length === 0) {
-        const summary = `No material developments since ${live.as_of}: ${fresh.length} claim(s) found, none dated after it with medium or high impact.`;
-        await this.note(summary, 0);
-        return { kind: 'no_changes', runId: this.deps.runId, summary, researchLog: this.digest(), costUsd: this.cost };
-      }
-      this.claims = material;
-      await this.note(`${material.length} material development(s) since ${live.as_of}; drafting a revision of version ${live.version}.`, 0);
-      await this.reopenBaseSources(live);
+      const noChanges = await this.researchUpdate(request.live, this.base!);
+      if (noChanges) return noChanges;
     }
     if (this.claims.length === 0 && request.kind === 'new_case') {
       throw new PipelineError('the researchers returned no verifiable claims', this.cost);
@@ -800,10 +880,12 @@ class PipelineRun {
         opened: this.openedRefs(),
         ...(this.base ? { base: this.base } : {}),
         ...(request.kind === 'revision' ? { instructions: request.instructions } : {}),
+        ...this.updateInput(),
       },
       0,
       { summarize: (o) => this.draftSummary(o) },
     );
+    for (const r of first.resolutions) this.resolutions.set(r.ref, r.resolution);
     let draft = this.prepare(first.case);
     let lastValid: DraftCase | undefined = this.validation(draft).ok ? draft : undefined;
     // What the last research-and-redraft pass cost, to judge whether another round is affordable.
@@ -875,12 +957,14 @@ class PipelineRun {
             previous: draft,
             critique: this.critiquesFor(r),
             ...(request.kind === 'revision' ? { instructions: request.instructions } : {}),
+            ...this.updateInput(),
           },
           round,
           { summarize: (o) => this.draftSummary(o) },
         );
         redraftCost = this.cost - redraftStart;
         this.recordResolutions(revised.resolutions, r, questions);
+        for (const x of revised.resolutions) this.resolutions.set(x.ref, x.resolution);
         draft = this.prepare(revised.case);
         if (this.validation(draft).ok) lastValid = draft;
       } catch (e) {
@@ -925,6 +1009,7 @@ class PipelineRun {
           draft,
           critiques: last ? this.critiquesFor(last) : {},
           openIssues: [...this.issues, ...openBefore].map((o, i) => ({ id: `oi-${i + 1}`, ...o })),
+          ...(this.live ? { unchanged: this.unchangedItems(draft) } : {}),
         },
         editRound,
         { useReserve: true, summarize: (o) => o.notes.join(' ') || 'No changes.' },
@@ -962,7 +1047,43 @@ class PipelineRun {
       editorFallback = true;
     }
 
-    // 6. Review record and package.
+    // 6. A live update that ends up changing nothing but its as-of date is not worth a review; otherwise its
+    // plain update summary (what changed against the live version, and why) goes into the review record.
+    let update: UpdateInfo | undefined;
+    if (this.live && this.base && this.screening) {
+      const since = this.screening.since;
+      if (!changesBeyondAsOf(diffCases(this.base, final as unknown as Case))) {
+        const why = this.screening.material
+          .slice(0, 5)
+          .map((c) => `"${clip(c.text, 160)}"${this.resolutions.get(c.id) ? ` (drafter: ${clip(this.resolutions.get(c.id)!, 200)})` : ''}`)
+          .join('; ');
+        const summary =
+          `No material change to version ${this.base.version}: the researchers found ${this.screening.material.length} development(s) since ${since}, ` +
+          `but the reviewed draft changes nothing beyond its as-of date, so no package was submitted. Developments: ${why}.`;
+        await this.note(summary, editRound);
+        return { kind: 'no_changes', runId: this.deps.runId, summary, baseVersion: this.base.version, since, researchLog: this.digest(), costUsd: this.cost };
+      }
+      const text = updateSummaryText({
+        live: this.live,
+        base: this.base,
+        since,
+        final,
+        developments: this.screening.material,
+        screening: this.screening,
+        resolutions: this.resolutions,
+      });
+      this.reports.push({ agent: 'editor', scope: 'update', round: editRound, at: new Date().toISOString(), summary: text });
+      await this.note(`Update summary for the admin:\n${text}`, editRound);
+      update = {
+        live_version: this.live.version,
+        base_version: this.base.version,
+        since,
+        developments: this.screening.material.map((c) => ({ id: c.id, text: c.text, url: c.url, publisher: c.publisher, date: developmentDate(c, since) })),
+        summary: text,
+      };
+    }
+
+    // 7. Review record and package.
     const finalFailures = checkCitations(final, this.store);
     // Only the editor's own version gets the "edited after the finding" note; a fallback is not the editor's text.
     const review = this.assembleReview(final, rounds, questions, clean, finalFailures, editorFallback ? final : draft);
@@ -980,6 +1101,7 @@ class PipelineRun {
       kind: 'package',
       runId: this.deps.runId,
       request: request.kind,
+      ...(update ? { update } : {}),
       case: checked.case,
       review: checked.case.review,
       outline: this.outline,
@@ -988,6 +1110,82 @@ class PipelineRun {
       rounds: rounds.length,
       clean,
       editorFallback,
+    };
+  }
+
+  /**
+   * Live update research: every researcher looks only for developments after the
+   * base version's as-of date. The verified claims are screened (dated after it,
+   * not low impact, not already in the base version). With nothing left the run
+   * ends here as `no_changes`, with the reason in the research log, unless a
+   * researcher failed: then "nothing new" is not known, and the run fails.
+   */
+  private async researchUpdate(live: Case, base: Case): Promise<NoChangesResult | undefined> {
+    const since = base.as_of;
+    const allJobs = [...this.outline.sides.map((side) => ({ side })), {}];
+    const fresh = await this.research(0, allJobs, { sinceAsOf: since, knownFacts: knownFactsOf(base), openQuestions: base.open_questions });
+    this.deps.signal?.throwIfAborted();
+    const screening = screenDevelopments(fresh, since, base);
+    this.screening = screening;
+    const found = describeScreening(screening, base.version);
+    const onTop = base.version !== live.version ? `, the update waiting for review on top of live version ${live.version}` : '';
+    if (screening.material.length === 0) {
+      if (this.researchFailures.length) {
+        const why =
+          `Research for the update was incomplete (${this.researchFailures.join('; ')}), and the other researchers found no new development ` +
+          `since ${since} (${found}). An incomplete search cannot show that nothing is new, so the job fails and the next run tries again.`;
+        await this.note(why, 0);
+        throw new PipelineError(why, this.cost);
+      }
+      const summary = `No material developments since ${since} (version ${base.version}${onTop}): ${found}. Nothing was drafted or submitted.`;
+      await this.note(summary, 0);
+      return { kind: 'no_changes', runId: this.deps.runId, summary, baseVersion: base.version, since, researchLog: this.digest(), costUsd: this.cost };
+    }
+    // A copy: claims that later rounds research for the critics' gaps are added to `this.claims`, not to the developments.
+    this.claims = [...screening.material];
+    // Must-answer: each development the researchers found, then the generic update items (minus the
+    // placeholder for "what has happened"), then what the base run answered. Never the open questions.
+    const devItems = screening.material
+      .slice(0, 8)
+      .map((c) => developmentItem(since, { text: c.text, publisher: c.publisher, date: developmentDate(c, since) }));
+    const placeholder = updateDevelopmentsItem(since);
+    const rest = this.outline.must_answer.filter((m) => m !== placeholder);
+    this.outline = {
+      ...this.outline,
+      must_answer: [...devItems, ...(screening.material.length > devItems.length ? [placeholder] : []), ...rest].slice(0, MAX_MUST_ANSWER),
+    };
+    await this.note(
+      `${screening.material.length} new development(s) since ${since} (${found}); drafting a revision of version ${base.version}${onTop}. ` +
+        `Developments: ${screening.material.map((c) => `${c.id} (${developmentDate(c, since) ?? 'undated'})`).join(', ')}.`,
+      0,
+    );
+    await this.reopenBaseSources(base);
+    return undefined;
+  }
+
+  /** Live updates: the steps and starting facts of a draft that are exactly as in the live version (order aside). */
+  private unchangedItems(draft: DraftCase): string[] {
+    const live = this.live;
+    if (!live) return [];
+    const steps = new Map(live.steps.map((s) => [s.id, { ...s, order: 0 }]));
+    const facts = new Map(live.starting_facts.map((f) => [f.id, f]));
+    return [
+      ...draft.starting_facts.filter((f) => facts.has(f.id) && deepEqual(f, facts.get(f.id))).map((f) => `fact:${f.id}`),
+      ...draft.steps.filter((s) => steps.has(s.id) && deepEqual({ ...s, order: 0 }, steps.get(s.id))).map((s) => s.id),
+    ];
+  }
+
+  /** The drafter's live-update context, in every round of an update run. */
+  private updateInput(): { update?: DrafterInput['update'] } {
+    if (!this.live || !this.base || !this.screening) return {};
+    return {
+      update: {
+        live_version: this.live.version,
+        base_version: this.base.version,
+        since: this.screening.since,
+        developments: this.screening.material.map((c) => c.id),
+        used_step_ids: this.base.steps.map((s) => s.id),
+      },
     };
   }
 

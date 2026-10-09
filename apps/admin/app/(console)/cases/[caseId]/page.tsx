@@ -395,6 +395,7 @@ export default async function CasePage({ params, searchParams }: { params: Promi
                       {j.base_version ? ` of v${j.base_version}` : ''} · <span className={`badge ${j.status === 'failed' ? 'badge-error' : ''}`}>{j.status}</span>{' '}
                       <span className="faint">{formatDateTime(j.created_at)}</span>
                       {j.error ? <div className="notice notice-error small">{j.error}</div> : null}
+                      {j.status === 'no_changes' && typeof j.result?.summary === 'string' ? <div className="muted">{j.result.summary}</div> : null}
                     </li>
                   ))}
                 </ul>

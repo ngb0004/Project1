@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { gzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { fetchSource } from '../src/research/fetch';
+import { extractHtml, fetchSource, isPublicAddress, parseIPv6, type ResolveHost } from '../src/research/fetch';
 
 /** A one-page PDF with a title and the given lines of text (Helvetica), built by hand. */
 export function makePdf(lines: string[], title: string): Buffer {
@@ -91,6 +92,13 @@ function handler(req: IncomingMessage, res: ServerResponse) {
       return res.end(Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]));
     case '/slow':
       return; // never answers
+    case '/gzip':
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'content-encoding': 'gzip' });
+      return res.end(gzipSync('Compressed statement from the county about the water main vote.'));
+    case '/bomb':
+      // 20 MB of zeros, gzipped to about 20 KB.
+      res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'gzip' });
+      return res.end(gzipSync(Buffer.alloc(20 * 1024 * 1024, 0x30)));
     default:
       res.writeHead(404, { 'content-type': 'text/html' });
       return res.end('<html><body>Not found</body></html>');
@@ -225,5 +233,148 @@ describe('fetchSource', () => {
   it('rejects bad URLs and non-http schemes without throwing', async () => {
     expect((await fetchSource('not a url')).error).toBe('not a valid URL');
     expect((await fetchSource('file:///etc/passwd')).error).toMatch(/unsupported scheme file:/);
+  });
+
+  it('decodes gzip bodies and applies the size limit to the decoded bytes (a gzip bomb is cut off)', async () => {
+    const r = await fetchSource(`${base}/gzip`, local);
+    expect(r.text).toBe('Compressed statement from the county about the water main vote.');
+    const bomb = await fetchSource(`${base}/bomb`, { ...local, maxBytes: 100_000 });
+    expect(bomb.bytes).toBe(100_000);
+    expect(bomb.error).toMatch(/cut off at 100000 bytes/);
+  });
+});
+
+describe('address guard', () => {
+  const port = () => Number(new URL(base).port);
+
+  it('refuses IPv6 literals that embed a private IPv4 address, in every spelling the URL parser produces', async () => {
+    const blocked = [
+      'http://[::ffff:127.0.0.1]/x',
+      'http://[::ffff:7f00:1]/x',
+      'http://[0:0:0:0:0:ffff:127.0.0.1]/x',
+      'http://[::ffff:169.254.169.254]/latest/meta-data/',
+      'http://[::7f00:1]/x',
+      'http://[::127.0.0.1]/x',
+      'http://[64:ff9b::7f00:1]/x',
+      'http://[2002:7f00:1::]/x',
+      'http://[2002:a9fe:a9fe::1]/x',
+      'http://[fec0::1]/x',
+      'http://[fd00::1]/x',
+      'http://[fe80::1]/x',
+      'http://[2001:db8::1]/x',
+      'http://[2001::1]/x',
+      'http://[::]/x',
+      'http://192.0.0.1/x',
+      'http://198.18.0.1/x',
+      'http://100.64.1.1/x',
+      'http://2130706433/x',
+    ];
+    for (const url of blocked) {
+      const r = await fetchSource(url, { timeoutMs: 2000 });
+      expect(r.status, url).toBe(0);
+      expect(r.error, url).toMatch(/private address/);
+    }
+  });
+
+  it('classifies addresses: only global unicast is public', () => {
+    for (const ip of ['8.8.8.8', '93.184.216.34', '2606:4700:4700::1111', '::ffff:8.8.8.8', '64:ff9b::808:808', '2002:808:808::1']) {
+      expect(isPublicAddress(ip), ip).toBe(true);
+    }
+    for (const ip of ['127.0.0.1', '10.1.2.3', '172.31.255.255', '192.168.1.1', '169.254.169.254', '0.0.0.0', '224.0.0.1', '255.255.255.255',
+      '::1', '::', '::ffff:7f00:1', '::ffff:a9fe:a9fe', 'fc00::1', 'fe80::1%eth0', 'ff02::1', '2001:db8::5', 'not-an-ip']) {
+      expect(isPublicAddress(ip), ip).toBe(false);
+    }
+    expect(parseIPv6('::ffff:1.2.3.4')).toEqual([0, 0, 0, 0, 0, 0xffff, 0x0102, 0x0304]);
+    expect(parseIPv6('1:2:3:4:5:6:7.8.9.10')).toEqual([1, 2, 3, 4, 5, 6, 0x0708, 0x090a]);
+    expect(parseIPv6('2001:db8::1')).toEqual([0x2001, 0xdb8, 0, 0, 0, 0, 0, 1]);
+  });
+
+  it('checks the address the connection uses: a name that resolves to a private address is refused at connect time', async () => {
+    const calls: string[] = [];
+    const resolve: ResolveHost = async (host) => {
+      calls.push(host);
+      return [{ address: '127.0.0.1', family: 4 }];
+    };
+    const r = await fetchSource(`http://rebind.test:${port()}/article.html`, { resolve, timeoutMs: 2000 });
+    expect(r.status).toBe(0);
+    expect(r.text).toBe('');
+    expect(r.error).toMatch(/rebind\.test: it resolves to a private address \(127\.0\.0\.1\)/);
+    // One lookup per connection: there is no separate check whose answer a rebinding name could change.
+    expect(calls).toEqual(['rebind.test']);
+  });
+
+  it('refuses when any answer is private, even if another is public', async () => {
+    const resolve: ResolveHost = async () => [
+      { address: '93.184.216.34', family: 4 },
+      { address: '10.0.0.7', family: 4 },
+    ];
+    const r = await fetchSource(`http://mixed.test:${port()}/article.html`, { resolve, timeoutMs: 2000 });
+    expect(r.error).toMatch(/private address \(10\.0\.0\.7\)/);
+  });
+
+  it('fails closed when the lookup fails', async () => {
+    const resolve: ResolveHost = async () => {
+      throw Object.assign(new Error('getaddrinfo ENOTFOUND broken.test'), { code: 'ENOTFOUND' });
+    };
+    const r = await fetchSource(`http://broken.test:${port()}/article.html`, { resolve, timeoutMs: 2000 });
+    expect(r.status).toBe(0);
+    expect(r.text).toBe('');
+    expect(r.error).toMatch(/fetch failed: ENOTFOUND/);
+  });
+
+  it('connects to exactly the address its lookup returned', async () => {
+    // "pipeline-test.invalid" cannot resolve through system DNS, so a successful fetch proves the
+    // connection used the guarded lookup's answer (and asked only once).
+    let n = 0;
+    const resolve: ResolveHost = async () => {
+      n++;
+      return [{ address: '127.0.0.1', family: 4 }];
+    };
+    const r = await fetchSource(`http://pipeline-test.invalid:${port()}/article.html`, { ...local, resolve });
+    expect(r.status).toBe(200);
+    expect(r.text).toContain('voted 5-4');
+    expect(n).toBe(1);
+  });
+});
+
+describe('extraction', () => {
+  const flat = (kb: number) => {
+    const para = '<p>Paragraph text, with commas, that Readability will score as content. Lorem ipsum dolor sit amet.</p>\n';
+    return `<!doctype html><html><head><title>big</title></head><body><article>${para.repeat(Math.floor((kb * 1024) / para.length))}</article></body></html>`;
+  };
+
+  it('is linear in the number of sibling elements: 1 MB of flat paragraphs extracts in about a second', () => {
+    const t0 = performance.now();
+    const r = extractHtml(flat(1024));
+    const ms = performance.now() - t0;
+    expect(r.text.length).toBeGreaterThan(500_000);
+    expect(ms).toBeLessThan(3000);
+  });
+
+  it('runs in a worker with a time limit: a page that takes too long fails its open instead of stalling', async () => {
+    const big = flat(1024);
+    const server2 = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(big);
+    });
+    await new Promise<void>((r) => server2.listen(0, '127.0.0.1', r));
+    try {
+      const url = `http://127.0.0.1:${(server2.address() as AddressInfo).port}/big.html`;
+      // The heartbeat keeps ticking while the worker extracts.
+      let ticks = 0;
+      const tick = setInterval(() => ticks++, 5);
+      const slow = await fetchSource(url, { ...local, extractTimeoutMs: 50 });
+      clearInterval(tick);
+      expect(slow.status).toBe(200);
+      expect(slow.text).toBe('');
+      expect(slow.error).toMatch(/text extraction took longer than 50 ms/);
+      expect(ticks).toBeGreaterThan(3);
+      const ok = await fetchSource(url, local);
+      expect(ok.error).toBeUndefined();
+      expect(ok.text.length).toBeGreaterThan(500_000);
+    } finally {
+      server2.closeAllConnections();
+      await new Promise<void>((r) => server2.close(() => r()));
+    }
   });
 });

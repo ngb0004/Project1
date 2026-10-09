@@ -5,10 +5,13 @@
  *   review record, research log, snapshots; default services/pipeline/.runs/<run>).
  *   Nothing touches the database.
  *
- * pipeline worker [--once] [--budget-usd N] [--poll-seconds N]
- *   Claims and runs queued jobs as the pipeline account. Needs SUPABASE_URL,
- *   SUPABASE_ANON_KEY, PIPELINE_EMAIL and PIPELINE_PASSWORD. It never uses the
- *   service-role key.
+ * pipeline worker [--once] [--job <id>] [--budget-usd N] [--max-rounds N] [--poll-seconds N]
+ *   Claims and runs queued jobs (new cases, revisions, live updates) as the
+ *   pipeline account, one at a time. Without --once it is a long-running
+ *   service: it polls the queue, renews each job's lease while it runs, and on
+ *   SIGTERM/SIGINT stops claiming, gives the job in progress a grace period,
+ *   then releases it back to the queue. --job claims only that job. It never
+ *   uses the service-role key. Environment: see WORKER_ENV below and README.md.
  *
  * pipeline check <case.json> --snapshots <dir>
  *   Validates a saved case and re-runs the citation check against saved snapshots.
@@ -21,7 +24,7 @@
  *
  * Models: PIPELINE_MODEL_STRONG / PIPELINE_MODEL_FAST. Budget: --budget-usd or PIPELINE_BUDGET_USD.
  */
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
@@ -32,16 +35,34 @@ import { FileResearchLog } from './research/log';
 import { SourceStore } from './research/store';
 import { ClaudeAgentRunner } from './runner/claude';
 import { verifyJob } from './verify';
-import { runWorker } from './worker';
+import { createShutdown, onShutdownSignals } from './shutdown';
+import { claimJobById, defaultWorkerId, runWorker } from './worker';
 
 /** Spend cap per run. A measured three-round run on a two-side case cost $18.20; three sides add a researcher and a red team per round. */
 export const DEFAULT_RUN_BUDGET_USD = 40;
 /** Offline runs land here by default (git-ignored). */
 export const DEFAULT_RUNS_DIR = resolve(import.meta.dirname, '..', '.runs');
 
+/** The worker's environment variables (also listed in README.md). */
+export const WORKER_ENV = {
+  SUPABASE_URL: 'API URL of the Supabase project (required)',
+  SUPABASE_ANON_KEY: 'anon (publishable) key of the project (required); the worker never uses the service-role key',
+  PIPELINE_EMAIL: 'the pipeline account (app_metadata.app_role = pipeline) (required)',
+  PIPELINE_PASSWORD: 'its password (required)',
+  PIPELINE_WORKER_ID: 'name recorded on claimed jobs (default: <hostname>:<pid>)',
+  PIPELINE_POLL_SECONDS: 'wait between polls of an empty queue (default 30; --poll-seconds)',
+  PIPELINE_HEARTBEAT_SECONDS: 'lease renewal interval while a job runs (default 60; a lease goes stale after 30 minutes)',
+  PIPELINE_SHUTDOWN_GRACE_SECONDS: 'on SIGTERM/SIGINT, time the job in progress gets before it is released (default 10)',
+  PIPELINE_BUDGET_USD: `spend cap per job in USD (default ${DEFAULT_RUN_BUDGET_USD}; --budget-usd)`,
+  PIPELINE_MAX_ROUNDS: 'critic-loop rounds per job (default 3; --max-rounds)',
+  PIPELINE_MODEL_STRONG: 'model for the scoper, drafter, critics and editor',
+  PIPELINE_MODEL_FAST: 'model for the researchers',
+  PIPELINE_HEALTH_FILE: 'optional file touched on every poll and heartbeat (for a container health check)',
+} as const;
+
 const USAGE = `usage:
   pipeline run --brief "<one line>" [--out <dir>] [--budget-usd N] [--max-rounds N] [--verbose]
-  pipeline worker [--once] [--budget-usd N] [--poll-seconds N] [--verbose]
+  pipeline worker [--once] [--job <id>] [--budget-usd N] [--max-rounds N] [--poll-seconds N] [--verbose]
   pipeline check <case.json> --snapshots <dir>
   pipeline verify <job-id> [--out <dir>]`;
 
@@ -71,6 +92,21 @@ function requireEnv(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`${name} must be set`);
   return v;
+}
+
+/** A non-negative number of seconds from a flag or an environment variable, in milliseconds. */
+export function secondsFrom(name: string, raw: string | undefined, fallbackSeconds: number): number {
+  if (raw === undefined || raw === '') return fallbackSeconds * 1000;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${name} must be a number of seconds, got "${raw}"`);
+  return n * 1000;
+}
+
+function roundsFrom(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 10) throw new Error(`--max-rounds must be a whole number from 1 to 10, got "${raw}"`);
+  return n;
 }
 
 async function cmdRun(argv: string[]): Promise<number> {
@@ -114,24 +150,72 @@ async function cmdWorker(argv: string[]): Promise<number> {
     args: argv,
     options: {
       once: { type: 'boolean' },
+      job: { type: 'string' },
       'budget-usd': { type: 'string' },
+      'max-rounds': { type: 'string' },
       'poll-seconds': { type: 'string' },
       verbose: { type: 'boolean' },
     },
   });
-  const db = await signInStaff(requireEnv('SUPABASE_URL'), requireEnv('SUPABASE_ANON_KEY'), {
-    email: requireEnv('PIPELINE_EMAIL'),
-    password: requireEnv('PIPELINE_PASSWORD'),
-  });
-  const abort = new AbortController();
-  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.once(sig, () => abort.abort(new Error(`received ${sig}`)));
-  const outcomes = await runWorker(
-    { db, runner: new ClaudeAgentRunner(values.verbose ? { onMessage: toolTrace } : {}), budgetUsd: budgetFrom(values['budget-usd']), onProgress: log, signal: abort.signal },
-    { once: values.once ?? false, pollMs: Number(values['poll-seconds'] ?? 30) * 1000 },
+  const env = process.env;
+  const url = requireEnv('SUPABASE_URL');
+  const anonKey = requireEnv('SUPABASE_ANON_KEY');
+  const creds = { email: requireEnv('PIPELINE_EMAIL'), password: requireEnv('PIPELINE_PASSWORD') };
+  const pollMs = secondsFrom('--poll-seconds', values['poll-seconds'] ?? env.PIPELINE_POLL_SECONDS, 30);
+  const heartbeatMs = Math.max(1000, secondsFrom('PIPELINE_HEARTBEAT_SECONDS', env.PIPELINE_HEARTBEAT_SECONDS, 60));
+  const graceMs = secondsFrom('PIPELINE_SHUTDOWN_GRACE_SECONDS', env.PIPELINE_SHUTDOWN_GRACE_SECONDS, 10);
+  const maxRounds = roundsFrom(values['max-rounds'] ?? env.PIPELINE_MAX_ROUNDS);
+  const budgetUsd = budgetFrom(values['budget-usd']);
+  const workerId = env.PIPELINE_WORKER_ID || defaultWorkerId();
+  const healthFile = env.PIPELINE_HEALTH_FILE;
+  const touch = healthFile
+    ? () => {
+        try {
+          const now = new Date();
+          if (existsSync(healthFile)) utimesSync(healthFile, now, now);
+          else writeFileSync(healthFile, `${workerId}\n`);
+        } catch {
+          // A health file that cannot be written must not stop the worker.
+        }
+      }
+    : undefined;
+
+  const db = await signInStaff(url, anonKey, creds);
+  const shutdown = createShutdown(graceMs, log);
+  const unwire = onShutdownSignals(shutdown);
+  const once = values.once ?? false;
+  log(
+    `worker ${workerId}: ${once ? 'one job' : `polling every ${pollMs / 1000} s`}${values.job ? `, job ${values.job} only` : ''}; ` +
+      `budget $${budgetUsd} per job; heartbeat ${heartbeatMs / 1000} s; shutdown grace ${graceMs / 1000} s`,
   );
-  for (const o of outcomes) process.stdout.write(`${JSON.stringify(o)}\n`);
-  if (values.once && outcomes.length === 0) log('no queued jobs');
-  return outcomes.some((o) => o.status === 'failed') ? 1 : 0;
+  try {
+    const outcomes = await runWorker(
+      {
+        db,
+        runner: new ClaudeAgentRunner(values.verbose ? { onMessage: toolTrace } : {}),
+        workerId,
+        ...(values.job ? { claim: claimJobById(values.job) } : {}),
+        budgetUsd,
+        ...(maxRounds ? { maxRounds } : {}),
+        heartbeatMs,
+        onProgress: log,
+        ...(touch ? { onAlive: touch } : {}),
+        signal: shutdown.abort,
+      },
+      {
+        once,
+        pollMs,
+        stop: shutdown.stop,
+        reconnect: () => signInStaff(url, anonKey, creds),
+        onOutcome: (o) => process.stdout.write(`${JSON.stringify(o)}\n`),
+      },
+    );
+    if (once && outcomes.length === 0) log(values.job ? `job ${values.job} is not claimable (not queued, or running elsewhere)` : 'no queued jobs');
+    if (shutdown.stop.aborted) log('stopped');
+    return outcomes.some((o) => o.status === 'failed') && once ? 1 : 0;
+  } finally {
+    unwire();
+  }
 }
 
 async function cmdVerify(argv: string[]): Promise<number> {
@@ -180,7 +264,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     case 'verify':
       return cmdVerify(rest);
     default:
-      process.stderr.write(`${USAGE}\n`);
+      process.stderr.write(`${USAGE}\n\nworker environment:\n${Object.entries(WORKER_ENV).map(([k, v]) => `  ${k.padEnd(32)} ${v}`).join('\n')}\n`);
       return cmd === undefined || cmd === 'help' || cmd === '--help' ? 0 : 2;
   }
 }

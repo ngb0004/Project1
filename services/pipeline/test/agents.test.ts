@@ -322,6 +322,14 @@ describe('outlineFromCase (revisions and updates skip the scoper)', () => {
     const upd = outlineFromCase(harbor, { sinceAsOf: harbor.as_of });
     expect(Outline.safeParse(upd).success).toBe(true);
     expect(upd.must_answer[0]).toContain(`since ${harbor.as_of}`);
+    // Keep unchanged facts, correct superseded ones, resolve answered open questions: never the open questions themselves.
+    expect(upd.must_answer[1]).toContain('correct or retire each step');
+    expect(upd.must_answer[2]).toContain('open question');
+    for (const q of harbor.open_questions) {
+      expect(upd.must_answer.some((m) => m.includes(q))).toBe(false);
+      expect(upd.notes).toContain(q);
+    }
+    expect(upd.notes).toContain(`Live update of version ${harbor.version}, current as of ${harbor.as_of}`);
   });
 
   it('carries over the must-answer items the base run answered (no-side hard questions), else falls back to the question', () => {

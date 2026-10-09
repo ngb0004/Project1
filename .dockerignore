@@ -1,0 +1,15 @@
+# Build context for services/pipeline/Dockerfile (run from the repository root).
+**/node_modules
+**/.next
+**/.expo
+**/dist
+**/coverage
+**/*.tsbuildinfo
+.git
+.env
+**/.env
+**/.env.*
+services/pipeline/.runs
+supabase/.temp
+supabase/.branches
+docs/acceptance

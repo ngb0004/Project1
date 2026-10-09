@@ -30,12 +30,49 @@ export interface DrafterInput {
   instructions?: string;
   /** The version being revised (admin revision) or updated (live update). */
   base?: Case | CaseInput;
+  /** A live update: given in every round, so revisions inside the critic loop keep the update rules. */
+  update?: DrafterUpdate;
+  /** What the researchers looked for and could not find or verify (research gaps, not public unknowns). */
+  research_gaps?: ResearchGapRef[];
 }
+
+/** A researcher's gap, as the drafter, the hard-questions agent and the admin see it. */
+export interface ResearchGapRef {
+  /** Who reported it: a side id or "records". */
+  scope: string;
+  description: string;
+  blocking?: boolean;
+  search_hint?: string;
+}
+
+export interface DrafterUpdate {
+  /** The live version the package updates. */
+  live_version: number;
+  /** The version the draft starts from: the live version, or the update package already in review on top of it. */
+  base_version: number;
+  /** Developments are dated after this `YYYY-MM-DD` (the base version's as-of date). */
+  since: string;
+  /** Ids of the claims that are new developments; each needs a resolution. */
+  developments: string[];
+  /** Step ids already used by the base version (new steps must not reuse them). */
+  used_step_ids: string[];
+}
+
+/**
+ * What was done about one critique item:
+ * - `changed`: the draft was changed to answer it;
+ * - `not_changed`: it was considered and left as it is (the resolution says why);
+ * - `needs_admin`: it cannot be settled from the opened sources or is the admin's call;
+ * - `not_applicable`: it does not apply to this case or draft.
+ */
+export const ResolutionAction = z.enum(['changed', 'not_changed', 'needs_admin', 'not_applicable']);
+export type ResolutionAction = z.output<typeof ResolutionAction>;
 
 export const Resolution = z
   .object({
     /** A hard question id, a red-team flag id, a gap id, `fact_check:<target>`, or `admin`. */
     ref: z.string().min(1).max(160),
+    action: ResolutionAction,
     resolution: Text(2000),
   })
   .strict();
@@ -45,6 +82,11 @@ export const DrafterOutput = z
   .object({
     case: DraftCase,
     resolutions: z.array(Resolution).max(120),
+    /**
+     * Facts the dive needs that no claim supplies: research gaps for the admin
+     * (not open questions, which are unknowns in the public record).
+     */
+    research_gaps: z.array(Text(600)).max(20).default([]),
   })
   .strict();
 export type DrafterOutput = z.output<typeof DrafterOutput>;
@@ -79,8 +121,19 @@ Rules:
 Revising:
 - With a previous draft and critique: revise that draft. Keep the ids of steps that survive, and renumber order to match position. Address each critique item the claims allow: reword loaded language, fix confidence labels, correct or cut unsupported text, reorder steps, and add steps from new claims that close gaps.
 - With a base version and admin notes: apply the notes to the base version and change nothing else unless a note requires it.
-- With a base version and new claims but no notes (a live update): add or revise steps for material new developments, update as_of, and keep everything else.
-- resolutions: one entry per critique item, gap or admin note you handled. ref is the hard question id, red-team flag id or gap id, "fact_check:<target>" for a fact-check row, or "admin" for the admin's notes. resolution says what you changed, or why you could not address it (for example, no opened source covers it).`;
+- resolutions: one entry per critique item, gap or admin note you handled. ref is the hard question id, red-team flag id or gap id, "fact_check:<target>" for a fact-check row, or "admin" for the admin's notes. resolution says what you changed, or why you could not address it (for example, no opened source covers it).
+
+Live updates (the prompt has an <update> block): the draft is the next version of a published case, and the admin reviews it as a diff against the live version.
+- Start from the base version and change only what the new developments require. Keep every starting fact, step, depth layer, side, open question and source that no development changes exactly as it is, with the same id and the same evidence: unchanged facts must show as unchanged in the diff.
+- Add a step for each material development, with a new id that is not in used_step_ids (for example "s<n>" above the highest number used). Never give a retired step's id to a different fact.
+- Modify a step (keeping its id) when a development changes the fact it states: a ruling decides a pending motion, a verdict replaces a pending trial, a figure is corrected. Update its headline, body, confidence, evidence and source_ids to match.
+- Retire (remove) a step only when a development shows it is wrong or no longer relevant, and give the reason in a resolution whose ref is the step id.
+- open_questions: remove each one a new claim answers, and state the answer in a step that cites that claim; keep the others word for word; add one when a development raises a new unknown.
+- Change starting_facts and steelmen only when a development changes them.
+- Place new steps where they belong in the story, keeping the order rules above (spread each side's strongest facts; do not end on one side's strongest fact), and renumber order 1..n.
+- resolutions: one entry per development (ref is its claim id) saying which step it went into, or why it was left out; one per retired step (ref is the step id); one per resolved open question (ref "open_question").
+- Inside the critic loop the previous draft already carries these changes: keep them while you answer the critique.
+- In the critic loop, change a fact that no development touches only for a blocking finding on it: a fact-check failure, a high-severity red-team flag, or a blocking hard question or gap. For any other critique of an unchanged fact, leave the fact exactly as it is and say in that item's resolution that it is left for the admin. The live version was reviewed; the update's diff should show the developments, not rewording.`;
 
 const drafter: AgentSpec<DrafterInput, DrafterOutput> = {
   name: 'drafter',
@@ -104,6 +157,15 @@ const drafter: AgentSpec<DrafterInput, DrafterOutput> = {
     else if (input.base) parts.push(`Update version ${input.base.version} of this live case with the new developments in the claims.`);
     else parts.push('Write the first draft of this case.');
     parts.push(`As-of date: ${ctx.asOf}.`, block('outline', input.outline));
+    if (input.update) {
+      const u = input.update;
+      parts.push(
+        `Live update of published version ${u.live_version}` +
+          (u.base_version !== u.live_version ? ` (starting from version ${u.base_version}, the update already waiting for review, which this one replaces)` : '') +
+          `. Every claim below is a development dated after ${u.since}, unless it closes a critic's gap. Follow the live-update rules.`,
+        block('update', u),
+      );
+    }
     parts.push(`Claims from the researchers (${input.claims.length}). Use only these:`, block('claims', input.claims));
     if (input.opened?.length) parts.push('Sources opened in this run:', block('opened', input.opened));
     if (input.base) parts.push(`Base version ${input.base.version}:`, block('base', draftOnly(input.base)));

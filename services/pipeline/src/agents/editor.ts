@@ -21,6 +21,11 @@ export interface EditorInput {
   critiques: Critiques;
   /** What is still unresolved after the loop; these go to the admin. */
   openIssues: OpenIssueLike[];
+  /**
+   * A live update: steps (ids) and starting facts (`fact:<id>`) that are exactly
+   * as in the live version, which was edited and approved before.
+   */
+  unchanged?: string[];
 }
 
 export const EditorOutput = z
@@ -41,6 +46,8 @@ What to fix (only fixes that need no new facts):
 - Schema and validator: fix every validator error listed in the prompt. Bodies are 2 to 4 sentences, headlines one line, every step and starting fact cites at least one source, every evidence quote's source is cited by its item, and every cited source is in sources.
 - Keep ids stable. Keep every evidence quote, quote layer and source field exactly as it is: they were checked against the stored sources.
 - Never add a fact, a source, a quote, a number or a name. Removing or narrowing is allowed; adding is not.
+
+- Live updates: items listed as unchanged are as the live version has them, which was edited and approved before. Leave them exactly as they are unless a validator error or a fact-check result on that item requires a change; edit the new and changed items.
 
 notes: one line per change you made (what and where), then one line per thing you could not fix without new facts, for the admin.`;
 
@@ -63,6 +70,9 @@ const editor: AgentSpec<EditorInput, EditorOutput> = {
     const draft = draftOnly(input.draft);
     const parts = ['Edit this draft into the final case.', block('draft', draft), 'Critiques from the last round:', block('critiques', input.critiques)];
     if (input.openIssues.length) parts.push('Open issues that go to the admin (fix any that need no new facts):', block('open_issues', input.openIssues));
+    if (input.unchanged?.length) {
+      parts.push('Live update. These items are unchanged from the live version; leave them as they are unless a validator error or a fact-check result on them requires a change:', block('unchanged', input.unchanged));
+    }
     const words = judgingWordReport(draft);
     parts.push(
       words.length ? 'Judging words found in user-facing copy (replace them):' : 'No listed judging words were found in user-facing copy.',

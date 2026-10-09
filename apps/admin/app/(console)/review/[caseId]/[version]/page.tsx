@@ -142,6 +142,10 @@ export default async function ReviewPage({
   }
 
   const issues = openIssueCount(doc);
+  // A live update carries a plain summary of what it changes against the live version, and why.
+  const updateReport = row.tags.includes('update')
+    ? [...doc.review.agent_reports].reverse().find((r) => r.agent === 'editor' && r.scope === 'update')
+    : undefined;
   const n = typeof sp.notice === 'string' ? NOTICES[sp.notice] : undefined;
   const notice = n && n.status === row.status ? n.text : undefined;
   const review = doc.review;
@@ -242,6 +246,14 @@ export default async function ReviewPage({
           <p className="notice notice-ok" role="status" style={{ marginTop: 16 }} data-testid="page-notice">
             {notice}
           </p>
+        ) : null}
+        {updateReport ? (
+          <div className="notice notice-info" style={{ marginTop: 16 }} data-testid="update-summary">
+            <strong>Live update: what changes against the live version, and why</strong>
+            <div className="small" style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>
+              {updateReport.summary}
+            </div>
+          </div>
         ) : null}
         {supersededBy ? <SupersededNotice caseId={caseId} version={version} by={supersededBy} /> : null}
         {existingDraft && row.status !== 'draft' ? (

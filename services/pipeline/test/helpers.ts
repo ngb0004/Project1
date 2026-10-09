@@ -76,6 +76,17 @@ export const PAGES: Record<string, FakePage> = {
     title: 'Audit finds county spent repair funds elsewhere',
     text: pad('An audit released on October 5, 2026 found that Maple County moved $400,000 of water repair funds to road paving in 2025.'),
   },
+  'https://news.example.com/2026/10/council-restores-fund': {
+    title: 'Council restores water repair money after audit',
+    text: pad(
+      'On October 11, 2026 the Maple County Council voted 7-2 to move $400,000 from road paving back to the water repair fund. ' +
+        'Council chair Dana Price said the vote answers the audit.',
+    ),
+  },
+  'https://news.example.com/2026/10/state-grants-restored': {
+    title: 'State restores part of the water grant cut',
+    text: pad('On October 13, 2026 the state restored 20 percent of the 2025 cut to local water infrastructure grants, the budget office said.'),
+  },
   'https://news.example.com/paywalled': { title: 'Subscribe', text: 'Subscribe to read.', status: 200 },
   'https://news.example.com/gone': { title: 'Not found', text: '', status: 404 },
 };
@@ -87,6 +98,8 @@ export const URLS = {
   breakNews: 'https://news.example.com/2025/09/elm-street-main-breaks',
   analysis: 'https://news.example.com/2025/09/state-cuts-analysis',
   audit: 'https://news.example.com/2026/10/new-audit',
+  restore: 'https://news.example.com/2026/10/council-restores-fund',
+  grantsRestored: 'https://news.example.com/2026/10/state-grants-restored',
 } as const;
 
 /** A fetcher over PAGES (no network). Unknown URLs are a 404. */
@@ -295,8 +308,10 @@ export function buildDraft(input: DrafterInput, ctx: AgentContext, opts: DraftOp
       },
     ],
     steps,
-    sides: input.outline.sides.map((s) => ({ id: s.id, label: s.label, steelman: `Supporters argue: ${s.position}` })),
-    open_questions: ['What did the council know before the June 2025 vote?'],
+    // A revision or update keeps the base steelmen; a first draft writes them from the outline.
+    sides: (base?.sides as DraftCase['sides'] | undefined)?.map((s) => ({ ...s })) ??
+      input.outline.sides.map((s) => ({ id: s.id, label: s.label, steelman: `Supporters argue: ${s.position}` })),
+    open_questions: (base?.open_questions as string[] | undefined) ?? ['What did the council know before the June 2025 vote?'],
     sources: [...sources.values()],
   };
   const critiqueRefs = [

@@ -1,7 +1,18 @@
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminCreateCase, adminPublish, adminSetUpdateCadence, type Db } from '@sia/case-store';
-import { anonClient, clearJobQueue, pool, sql, submitFixture, userClient, withQueueLock } from './helpers';
+import {
+  adminCreateCase,
+  adminPublish,
+  adminRequestUpdate,
+  adminSaveEdit,
+  adminSchedule,
+  adminSetUpdateCadence,
+  getStaffVersion,
+  listReviewDecisions,
+  submitCasePackage,
+  type Db,
+} from '@sia/case-store';
+import { anonClient, clearJobQueue, loadFixture, pool, sql, submitFixture, userClient, withQueueLock } from './helpers';
 
 let admin: Db;
 let pipeline: Db;
@@ -99,5 +110,134 @@ describe('package import', () => {
     const { loadFixture, freshSlug } = await import('./helpers');
     const doc = { ...loadFixture('fixture-harbor-bridge'), parent_version: 1, version: 2 };
     await expect(submitCasePackage(pipeline, { slug: freshSlug(), doc })).rejects.toThrow(/not a published version/);
+  });
+});
+
+describe('live update jobs', () => {
+  const activeUpdates = (caseId: string) =>
+    sql(`select id, status from public.pipeline_jobs where case_id = $1 and kind = 'update' and status in ('queued', 'running')`, [caseId]);
+
+  it('a case never has two update jobs queued or running at once', async () => {
+    const { case_id, version } = await submitFixture(pipeline);
+    await adminPublish(admin, case_id, version);
+    await adminSetUpdateCadence(admin, case_id, '1 hour');
+    await withQueueLock(async () => {
+      await sql(`update public.cases set next_update_at = now() - interval '1 minute' where id = $1`, [case_id]);
+      const [first] = await sql(`select app.enqueue_due_updates() as n`);
+      expect(first.n).toBeGreaterThanOrEqual(1);
+      // The schedule firing again, racing the admin: still one job.
+      await sql(`update public.cases set next_update_at = now() - interval '1 minute' where id = $1`, [case_id]);
+      await Promise.all([sql(`select app.enqueue_due_updates()`), adminRequestUpdate(admin, case_id).catch(() => null)]);
+      const jobs = await activeUpdates(case_id);
+      expect(jobs).toEqual([{ id: expect.any(String), status: 'queued' }]);
+      await expect(adminRequestUpdate(admin, case_id)).rejects.toThrow(/already queued or running/);
+      await expect(
+        sql(`insert into public.pipeline_jobs (kind, case_id, base_version) values ('update', $1, $2)`, [case_id, version]),
+      ).rejects.toThrow(/pipeline_jobs_one_active_update/);
+
+      // Running counts too.
+      const claim = await pipeline.rpc('pipeline_claim_job', { p_worker: 'w-upd', p_job_id: jobs[0].id });
+      expect(claim.data[0]).toMatchObject({ id: jobs[0].id, status: 'running' });
+      await expect(adminRequestUpdate(admin, case_id)).rejects.toThrow(/already queued or running/);
+      expect((await pipeline.rpc('pipeline_finish_job', { p_job_id: jobs[0].id, p_status: 'no_changes', p_worker: 'w-upd' })).error).toBeNull();
+    });
+    // Once it finished, the admin can ask for the next one.
+    const next = await adminRequestUpdate(admin, case_id);
+    expect(await activeUpdates(case_id)).toEqual([{ id: next, status: 'queued' }]);
+    await sql(`update public.pipeline_jobs set status = 'cancelled' where id = $1`, [next]);
+    await adminSetUpdateCadence(admin, case_id, null);
+  });
+
+  it('a worker claims a named job, renews its lease, and only the holder can finish or release it', async () => {
+    const jobId = await adminCreateCase(admin, 'Lease test brief');
+    await withQueueLock(async () => {
+      const c1 = await pipeline.rpc('pipeline_claim_job', { p_worker: 'w-a', p_job_id: jobId });
+      expect(c1.data).toEqual([expect.objectContaining({ id: jobId, status: 'running', claimed_by: 'w-a', attempts: 1 })]);
+      // A running job with a fresh heartbeat cannot be claimed again.
+      expect((await pipeline.rpc('pipeline_claim_job', { p_worker: 'w-b', p_job_id: jobId })).data).toEqual([]);
+    });
+
+    expect((await pipeline.rpc('pipeline_renew_lease', { p_job_id: jobId, p_worker: 'w-a' })).data).toBe(true);
+    expect((await pipeline.rpc('pipeline_renew_lease', { p_job_id: jobId, p_worker: 'w-b' })).data).toBe(false);
+    for (const fn of ['pipeline_renew_lease', 'pipeline_release_job']) {
+      expect((await admin.rpc(fn, { p_job_id: jobId, p_worker: 'w-a' })).error?.message).toMatch(/pipeline only/);
+      expect((await anon.rpc(fn, { p_job_id: jobId, p_worker: 'w-a' })).error).not.toBeNull();
+    }
+    const wrongFinish = await pipeline.rpc('pipeline_finish_job', { p_job_id: jobId, p_status: 'succeeded', p_worker: 'w-b' });
+    expect(wrongFinish.error?.message).toMatch(/not running for worker w-b/);
+    expect((await pipeline.rpc('pipeline_release_job', { p_job_id: jobId, p_worker: 'w-b' })).error?.message).toMatch(/not running for worker w-b/);
+
+    // Released (a worker shutting down): back in the queue, no longer held.
+    const rel = await pipeline.rpc('pipeline_release_job', { p_job_id: jobId, p_worker: 'w-a', p_reason: 'received SIGTERM' });
+    expect(rel).toMatchObject({ data: 'queued', error: null });
+    const [queued] = await sql(`select status, claimed_by, heartbeat_at, attempts, error from public.pipeline_jobs where id = $1`, [jobId]);
+    expect(queued).toEqual({ status: 'queued', claimed_by: null, heartbeat_at: null, attempts: 1, error: null });
+    expect((await pipeline.rpc('pipeline_renew_lease', { p_job_id: jobId, p_worker: 'w-a' })).data).toBe(false);
+
+    // The third attempt that is released fails the job instead of queuing it forever.
+    await withQueueLock(async () => {
+      for (const n of [2, 3]) {
+        const c = await pipeline.rpc('pipeline_claim_job', { p_worker: `w-${n}`, p_job_id: jobId });
+        expect(c.data[0]).toMatchObject({ attempts: n });
+        const r = await pipeline.rpc('pipeline_release_job', { p_job_id: jobId, p_worker: `w-${n}`, p_reason: 'deploy' });
+        expect(r.data).toBe(n < 3 ? 'queued' : 'failed');
+      }
+    });
+    const [failed] = await sql(`select status, error, finished_at is not null as finished from public.pipeline_jobs where id = $1`, [jobId]);
+    expect(failed).toEqual({ status: 'failed', error: 'Released after attempt 3 and not retried: deploy', finished: true });
+  });
+
+  it('a job abandoned after its last attempt fails; an earlier attempt stays reclaimable', async () => {
+    const [last, earlier] = await Promise.all([adminCreateCase(admin, 'Abandoned job 1'), adminCreateCase(admin, 'Abandoned job 2')]);
+    await withQueueLock(async () => {
+      await sql(
+        `update public.pipeline_jobs set status = 'running', claimed_by = 'gone', heartbeat_at = now() - interval '31 minutes',
+                attempts = case when id = $1 then 3 else 1 end
+          where id in ($1, $2)`,
+        [last, earlier],
+      );
+      await sql(`select app.expire_abandoned_jobs()`);
+      const rows = await sql(`select id, status, error from public.pipeline_jobs where id in ($1, $2)`, [last, earlier]);
+      expect(rows.find((r) => r.id === last)).toMatchObject({ status: 'failed', error: expect.stringMatching(/^Abandoned: no heartbeat from gone since .* after 3 attempt\(s\)\.$/) });
+      expect(rows.find((r) => r.id === earlier)).toMatchObject({ status: 'running' });
+      const reclaimed = await pipeline.rpc('pipeline_claim_job', { p_worker: 'w-new', p_job_id: earlier });
+      expect(reclaimed.data[0]).toMatchObject({ id: earlier, claimed_by: 'w-new', attempts: 2 });
+      await sql(`update public.pipeline_jobs set status = 'cancelled' where id = $1`, [earlier]);
+    });
+  });
+
+  it("an update package supersedes the pipeline's update in review that it builds on, and nothing else", async () => {
+    const { case_id, slug, version: v1 } = await submitFixture(pipeline);
+    await adminPublish(admin, case_id, v1);
+    const base = loadFixture('fixture-harbor-bridge');
+    const update = (title: string) => ({ ...base, title, parent_version: v1 });
+    const submit = (title: string, basedOnVersion: number, tags: string[]) =>
+      submitCasePackage(pipeline, { slug, doc: update(title), basedOnVersion, tags });
+    const status = async (v: number) => (await getStaffVersion(admin, case_id, v))!.status;
+
+    const u1 = await submit('Update one', v1, ['update']);
+    expect(await status(v1)).toBe('published');
+    const u2 = await submit('Update two', u1.version, ['update']);
+    expect(await status(u1.version)).toBe('archived');
+    expect((await listReviewDecisions(admin, case_id, u1.version)).map((d) => d.notes)).toContain(
+      `Superseded by version ${u2.version}, a newer update of live version ${v1} built on this one.`,
+    );
+
+    // A package not tagged 'update' does not supersede an update in review.
+    const r = await submit('A revision', u2.version, ['revision']);
+    expect(await status(u2.version)).toBe('in_review');
+
+    // An update approved for a set time is the admin's decision: not superseded.
+    await adminSchedule(admin, case_id, r.version, new Date(Date.now() + 86_400_000));
+    await submit('Update three', r.version, ['update']);
+    expect(await status(r.version)).toBe('in_review');
+
+    // Nor is an admin edit draft, or an imported package.
+    const edit = await adminSaveEdit(admin, case_id, u2.version, { ...(await getStaffVersion(admin, case_id, u2.version))!.doc, title: 'Edited' });
+    await submit('Update four', edit.version, ['update']);
+    expect(await status(edit.version)).toBe('draft');
+    const imported = await submitCasePackage(pipeline, { slug, doc: update('Imported'), basedOnVersion: v1, origin: 'import' });
+    await submit('Update five', imported.version, ['update']);
+    expect(await status(imported.version)).toBe('in_review');
   });
 });

@@ -65,15 +65,32 @@ export interface VersionSummaryRow {
 const VERSION_SUMMARY_COLUMNS =
   'case_id, slug, version, status, origin, tags, parent_version, based_on_version, title, as_of, created_at, submitted_at, published_at, scheduled_publish_at, is_live';
 
+/** Case ids per request: a long `in` list overflows the URL limit (hundreds of cases did). */
+const SUMMARY_ID_CHUNK = 100;
+/** Rows per page: PostgREST returns at most `max_rows` (1000) rows per request. */
+const SUMMARY_PAGE = 1000;
+
 export async function listVersionSummaries(db: Db, caseIds: string[]): Promise<VersionSummaryRow[]> {
-  if (caseIds.length === 0) return [];
-  return unwrap(
-    await db
-      .from('staff_case_versions')
-      .select(VERSION_SUMMARY_COLUMNS)
-      .in('case_id', caseIds)
-      .order('version', { ascending: false }),
-  ) as VersionSummaryRow[];
+  const ids = [...new Set(caseIds)];
+  const out: VersionSummaryRow[] = [];
+  for (let i = 0; i < ids.length; i += SUMMARY_ID_CHUNK) {
+    const chunk = ids.slice(i, i + SUMMARY_ID_CHUNK);
+    for (let from = 0; ; from += SUMMARY_PAGE) {
+      const rows = unwrap(
+        await db
+          .from('staff_case_versions')
+          .select(VERSION_SUMMARY_COLUMNS)
+          .in('case_id', chunk)
+          .order('version', { ascending: false })
+          .order('case_id')
+          .range(from, from + SUMMARY_PAGE - 1),
+      ) as VersionSummaryRow[];
+      out.push(...rows);
+      if (rows.length < SUMMARY_PAGE) break;
+    }
+  }
+  // Newest version first, as one query would have returned them.
+  return out.sort((a, b) => b.version - a.version);
 }
 
 // ---------------------------------------------------------------------------

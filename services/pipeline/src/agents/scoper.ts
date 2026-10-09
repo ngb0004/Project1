@@ -101,11 +101,30 @@ export default scoper;
 export interface OutlineFromCaseOptions {
   /** A revision: the admin's notes, which the draft must carry out. */
   instructions?: string;
-  /** A live update: the live version's as-of date; the draft must report what is new since then. */
+  /**
+   * A live update: the as-of date of the version being updated (the live
+   * version, or the update package already waiting for review on top of it).
+   * The draft must report what is new since then.
+   */
   sinceAsOf?: string;
 }
 
 const clipText = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+
+/** Most must-answer items an outline carries (the Outline schema allows 15). */
+export const MAX_MUST_ANSWER = 15;
+
+/** The generic first must-answer item of a live update, before the researchers have reported. */
+export const updateDevelopmentsItem = (since: string) =>
+  `What has happened since ${since} that bears on the question, and does the draft report each material development with its date and source?`;
+
+/** A must-answer item for one development the update researchers found. */
+export function developmentItem(since: string, d: { text: string; publisher: string; date: string | null }): string {
+  return clipText(
+    `New since ${since}: "${clipText(d.text, 240)}" (${d.publisher}${d.date ? `, ${d.date}` : ''}). Does the draft report it with its date and source, or is it immaterial to the question?`,
+    400,
+  );
+}
 
 /**
  * An outline for a case that already exists (revisions and live updates skip
@@ -115,10 +134,13 @@ const clipText = (s: string, max: number) => (s.length > max ? `${s.slice(0, max
  * The must-answer list is NOT the base version's open questions: those are
  * unknowns by design, and asking the hard-questions agent to see them answered
  * would block every revision for all three rounds. It is, in order: the admin's
- * notes (revision) or the developments since the live as-of date (update), then
- * the must-answer items the base version's own run answered (its hard questions
- * that belong to no side), and at least the case question itself. The open
- * questions go to `notes` so the drafter keeps them unless a new source answers one.
+ * notes (revision), or for an update the developments since the base as-of date
+ * (the orchestrator replaces this item with one per development once the
+ * researchers report), that unchanged facts are kept and superseded ones
+ * corrected, and that open questions a new source answers are resolved; then the
+ * must-answer items the base version's own run answered (its hard questions that
+ * belong to no side), and at least the case question itself. The open questions
+ * go to `notes` so the drafter keeps them unless a new source answers one.
  */
 export function outlineFromCase(c: Case | CaseInput, opts: OutlineFromCaseOptions = {}): Outline {
   const must: string[] = [];
@@ -126,15 +148,35 @@ export function outlineFromCase(c: Case | CaseInput, opts: OutlineFromCaseOption
     const text = clipText(q.trim(), 400);
     if (text && must.length < 12 && !must.includes(text)) must.push(text);
   };
+  const open = c.open_questions ?? [];
   const notes = opts.instructions?.trim();
   if (notes) add(`Does the draft carry out the admin's notes for this revision: "${notes}"?`);
-  if (opts.sinceAsOf) add(`What has happened since ${opts.sinceAsOf} that bears on the question, and does the draft report each material development with its date?`);
+  if (opts.sinceAsOf) {
+    add(updateDevelopmentsItem(opts.sinceAsOf));
+    add(
+      `Does the draft keep each fact of version ${c.version} that no development since ${opts.sinceAsOf} changes, and correct or retire each step that a development supersedes or contradicts?`,
+    );
+    if (open.length) {
+      add(`Does the draft resolve, with a sourced step, each open question of version ${c.version} that a new source answers, and keep the others as open questions?`);
+    }
+  }
   for (const q of c.review?.hard_questions ?? []) {
     if (!q.side_id && q.status === 'answered') add(q.question);
   }
   if (must.length === 0) add(`Does the draft set out the facts each side relies on to answer: ${c.question.prompt}`);
 
-  const open = c.open_questions ?? [];
+  const noteParts: string[] = [];
+  if (opts.sinceAsOf) {
+    noteParts.push(
+      `Live update of version ${c.version}, current as of ${opts.sinceAsOf}. Report only developments dated after ${opts.sinceAsOf}; keep every fact of version ${c.version} that they do not change.`,
+    );
+  }
+  if (open.length) {
+    noteParts.push(
+      `Version ${c.version} (as of ${c.as_of}) lists these open questions, unknown when it was written. Keep each in open_questions ` +
+        `unless a source opened in this run answers it; they are not gaps to close: ${open.map((q) => `"${q}"`).join('; ')}`,
+    );
+  }
   return {
     slug: c.slug,
     title: c.title,
@@ -147,12 +189,6 @@ export function outlineFromCase(c: Case | CaseInput, opts: OutlineFromCaseOption
     must_answer: must,
     content_warning: c.content_warning ?? null,
     timeline: [],
-    notes: open.length
-      ? clipText(
-          `Version ${c.version} (as of ${c.as_of}) lists these open questions, unknown when it was written. Keep each in open_questions ` +
-            `unless a source opened in this run answers it; they are not gaps to close: ${open.map((q) => `"${q}"`).join('; ')}`,
-          2000,
-        )
-      : '',
+    notes: clipText(noteParts.join(' '), 2000),
   };
 }

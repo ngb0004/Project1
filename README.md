@@ -104,7 +104,8 @@ SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<anon> PIPELINE_EMAIL=pipe
 
 The worker needs Claude access for the Agent SDK (for example
 `ANTHROPIC_API_KEY`). See [`services/pipeline/README.md`](services/pipeline/README.md)
-for models, spend caps and running it as a service.
+for models, spend caps, how live updates work, and running the worker as a
+service (a Dockerfile, next to a hosted Supabase project).
 
 ## Tests
 
@@ -117,7 +118,8 @@ for models, spend caps and running it as a service.
 | `pnpm --filter @sia/mobile test` | Native and web renderers: full flow for both fixtures, crowd hidden until commit |
 | `pnpm --filter @sia/mobile e2e:web` | Chromium against the local stack: both fixtures end to end |
 | `pnpm --filter @sia/admin test` / `e2e` | Console logic; Playwright acceptance (edit then approve) against a production build |
-| `pnpm --filter @sia/pipeline test` | Pipeline infrastructure, agents, loop rules, worker, fabricated-claim test |
+| `pnpm --filter @sia/pipeline test` | Pipeline infrastructure, agents, loop rules, worker, fabricated-claim test, live updates (scheduled re-research to a revision in review) |
+| `pnpm --filter @sia/admin e2e:live-update` | Phase 5 in the browser: a scheduled update lands in the queue as a diff; the live case is unchanged until it is approved |
 | `PIPELINE_LIVE=1 pnpm --filter @sia/pipeline test test/fabricated-claim.test.ts` | The real fact-checker against planted claims (about $0.40) |
 
 Run the database suites one package at a time; they share one local database.

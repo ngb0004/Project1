@@ -1422,7 +1422,11 @@ class PipelineRun {
 
     // 7. Review record and package.
     const finalFailures = checkCitations(final, this.store);
-    const unopened = finalFailures.filter((f) => f.verdict === 'source_unavailable');
+    const unopened = finalFailures.filter((f) => {
+      if (f.verdict !== 'source_unavailable') return false;
+      const src = final.sources.find((x) => x.id === f.source_id);
+      return !src || !this.isBaseSource(src.url);
+    });
     if (unopened.length) {
       throw new PipelineError(`the package still cites sources never opened in this run: ${unopened.map((f) => `${f.target} (${f.note})`).join('; ')}`, this.cost);
     }
@@ -1733,7 +1737,9 @@ class PipelineRun {
    * longer validates fails the run rather than ship.
    */
   private async dropUnopenedSources(c: DraftCase, round: number): Promise<DraftCase> {
-    const ghosts = new Map(c.sources.filter((x) => this.store.findAllByUrl(x.url).length === 0).map((x) => [x.id, x]));
+    // A source the version being revised already cites was opened by the job that cited it: when it cannot be
+    // re-opened now (and no archived snapshot was loaded) its citations stay, as failures the admin sees.
+    const ghosts = new Map(c.sources.filter((x) => this.store.findAllByUrl(x.url).length === 0 && !this.isBaseSource(x.url)).map((x) => [x.id, x]));
     if (!ghosts.size) return c;
     const out = structuredClone(c);
     const keep = (ids: string[] | undefined) => (ids ?? []).filter((id) => !ghosts.has(id));
@@ -1789,6 +1795,11 @@ class PipelineRun {
       );
     }
     return out;
+  }
+
+  /** Whether the version being revised or updated cites this URL. */
+  private isBaseSource(url: string): boolean {
+    return (this.base?.sources ?? []).some((s) => urlKey(s.url) === urlKey(url));
   }
 
   /** A medium open issue for each user-facing text that still uses a judging word (house style). */
@@ -2035,6 +2046,15 @@ class PipelineRun {
         severity: q.blocking ? 'medium' : 'low',
         description: clip(`Open question${q.side_id ? ` (skeptic for "${sideLabel(q.side_id)}")` : ''}: ${q.question}${q.resolution ? ` ${q.resolution}` : ''}`, 2000),
         ...(step ? { step_id: step } : {}),
+        resolved: false,
+      });
+    }
+    // Gaps the hard-questions agent still reported in the last round that are not blocking (blocking ones are above).
+    for (const g of last?.hard?.gaps.filter((x) => !x.blocking) ?? []) {
+      open.push({
+        source: 'hard_questions',
+        severity: 'low',
+        description: clip(`Gap (not blocking): ${g.description}${g.search_hint ? ` (search hint: ${g.search_hint})` : ''}`, 2000),
         resolved: false,
       });
     }

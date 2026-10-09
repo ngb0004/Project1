@@ -19,6 +19,7 @@ import {
   Outline,
   RedTeamFlag,
   ResearchClaim,
+  balanceWarnings,
   draftOnly,
   factCheckTargets,
   judgingWordReport,
@@ -350,3 +351,21 @@ describe('outlineFromCase (revisions and updates skip the scoper)', () => {
     expect(outlineFromCase(harbor).must_answer).toEqual([expect.stringContaining(harbor.question.prompt)]);
   });
 });
+
+describe('balance warnings for the drafter and the editor', () => {
+  it('warn when the last third of the dive leans to one side, or is mostly tagged neutral', () => {
+    const d = structuredClone(draft);
+    // Grow the fixture to 6 steps (copies with new ids) so it has a last third to judge.
+    for (let n = d.steps.length + 1; d.steps.length < 6; n++) d.steps.push({ ...structuredClone(d.steps[0]!), id: `s${n}`, order: n });
+    const sides = d.sides.map((s) => s.id);
+    const tail = Math.ceil(d.steps.length / 3);
+    const ordered = [...d.steps].sort((a, b) => a.order - b.order);
+    ordered.forEach((st, i) => (st.favors = i >= ordered.length - tail ? sides[0]! : sides[i % 2]!));
+    expect(balanceWarnings(d).some((w) => w.startsWith('The last third of the dive') && w.includes(sides[0]!))).toBe(true);
+    ordered.forEach((st, i) => (st.favors = i >= ordered.length - tail ? 'neutral' : sides[i % 2]!));
+    expect(balanceWarnings(d).some((w) => w.startsWith('Most of the last third of the dive') && w.includes('tagged neutral'))).toBe(true);
+    ordered.forEach((st, i) => (st.favors = sides[i % 2]!));
+    expect(balanceWarnings(d).filter((w) => w.includes('last third'))).toEqual([]);
+  });
+});
+

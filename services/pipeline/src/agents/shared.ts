@@ -201,10 +201,32 @@ export function judgingWordReport(c: CaseInput | DraftCase): Array<{ path: strin
     .filter((r) => r.words.length > 0);
 }
 
-/** Balance warnings (steps per side, strongest facts bunched at the end) for a draft that parses. */
+/**
+ * Balance warnings for a draft that parses: the schema's (steps per side,
+ * strongest facts bunched at the end), plus how the dive ends. The last third
+ * of the steps is where readers settle; it should not lean to one side, and
+ * steps tagged "neutral" there (outcomes, tallies, procedure) often help one
+ * side without being counted.
+ */
 export function balanceWarnings(c: CaseInput | DraftCase): string[] {
   const parsed = Case.safeParse(draftOnly(c));
-  return parsed.success ? computeBalance(parsed.data).warnings : [];
+  if (!parsed.success) return [];
+  const out = [...computeBalance(parsed.data).warnings];
+  const steps = [...parsed.data.steps].sort((a, b) => a.order - b.order);
+  if (steps.length >= 6) {
+    const tail = steps.slice(steps.length - Math.ceil(steps.length / 3));
+    const ids = tail.map((s) => s.id).join(', ');
+    const bySide = new Map<string, number>();
+    for (const s of tail) if (s.favors && s.favors !== 'neutral') bySide.set(s.favors, (bySide.get(s.favors) ?? 0) + 1);
+    const neutral = tail.filter((s) => !s.favors || s.favors === 'neutral').length;
+    if (bySide.size === 1 && [...bySide.values()][0]! >= 2) {
+      out.push(`The last third of the dive (${ids}) leans to one side: ${[...bySide.keys()][0]} has ${[...bySide.values()][0]} steps there and no other side has any.`);
+    }
+    if (neutral * 2 > tail.length) {
+      out.push(`Most of the last third of the dive (${ids}) is tagged neutral: check which side each of those steps really helps, and whether outcomes or procedure belong in a polled step at all.`);
+    }
+  }
+  return out;
 }
 
 /** Validator errors and warnings for a draft, as short lines. */

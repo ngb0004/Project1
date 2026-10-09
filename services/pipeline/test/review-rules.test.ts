@@ -256,6 +256,7 @@ describe('what stays unresolved reaches the admin', () => {
     const issues = pkg.review.open_issues;
     expect(issues).toContainEqual(expect.objectContaining({ source: 'hard_questions', severity: 'low', description: expect.stringContaining('Did the council have reserve funds?') }));
     expect(issues).toContainEqual(expect.objectContaining({ source: 'hard_questions', severity: 'low', description: expect.stringContaining('Why did two members switch votes?') }));
+    expect(issues).toContainEqual(expect.objectContaining({ source: 'hard_questions', severity: 'low', description: 'Gap (not blocking): Reserve fund balance (search hint: county budget 2025)' }));
     expect(issues).toContainEqual(expect.objectContaining({ source: 'pipeline', severity: 'low', description: expect.stringMatching(/records researcher: \(1\) No court filings could be opened\./) }));
     expect(issues).toContainEqual(expect.objectContaining({ source: 'pipeline', severity: 'low', description: expect.stringContaining('When the main was installed.') }));
     // The drafter and the hard-questions agent were told what the researchers could not find.

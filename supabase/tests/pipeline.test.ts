@@ -187,6 +187,34 @@ describe('live update jobs', () => {
     expect(failed).toEqual({ status: 'failed', error: 'Released after attempt 3 and not retried: deploy', finished: true });
   });
 
+  it('a job records its spend across attempts: heartbeat, release and finish never lower it, and only the holder writes it', async () => {
+    const jobId = await adminCreateCase(admin, 'Spend test brief');
+    const spent = async () => Number((await sql<{ spent_usd: string }>(`select spent_usd from public.pipeline_jobs where id = $1`, [jobId]))[0]!.spent_usd);
+    await withQueueLock(async () => {
+      const c = await pipeline.rpc('pipeline_claim_job', { p_worker: 'w-s1', p_job_id: jobId });
+      expect(c.data).toEqual([expect.objectContaining({ id: jobId, spent_usd: 0 })]);
+    });
+    expect(await spent()).toBe(0);
+    expect((await pipeline.rpc('pipeline_renew_lease', { p_job_id: jobId, p_worker: 'w-s1', p_spent_usd: 1.25 })).data).toBe(true);
+    expect(await spent()).toBe(1.25);
+    // A lower report (a stale heartbeat) never lowers it; another worker cannot write it; a negative value is refused.
+    expect((await pipeline.rpc('pipeline_renew_lease', { p_job_id: jobId, p_worker: 'w-s1', p_spent_usd: 0.5 })).data).toBe(true);
+    expect((await pipeline.rpc('pipeline_renew_lease', { p_job_id: jobId, p_worker: 'w-other', p_spent_usd: 99 })).data).toBe(false);
+    expect((await pipeline.rpc('pipeline_renew_lease', { p_job_id: jobId, p_worker: 'w-s1', p_spent_usd: -1 })).error?.message).toMatch(/negative/);
+    expect(await spent()).toBe(1.25);
+    expect((await pipeline.rpc('pipeline_release_job', { p_job_id: jobId, p_worker: 'w-s1', p_reason: 'deploy', p_spent_usd: 2 })).data).toBe('queued');
+    expect(await spent()).toBe(2);
+    // The next attempt sees what the earlier one spent, and finishing records the total.
+    await withQueueLock(async () => {
+      const c = await pipeline.rpc('pipeline_claim_job', { p_worker: 'w-s2', p_job_id: jobId });
+      expect(c.data).toEqual([expect.objectContaining({ attempts: 2, spent_usd: 2 })]);
+    });
+    expect((await pipeline.rpc('pipeline_finish_job', { p_job_id: jobId, p_status: 'failed', p_worker: 'w-s2', p_spent_usd: 3.5 })).error).toBeNull();
+    expect(await spent()).toBe(3.5);
+    // Staff cannot set it: the column is written only through the worker functions.
+    expect((await admin.from('pipeline_jobs').update({ spent_usd: 0 }).eq('id', jobId).select('id')).error).not.toBeNull();
+  });
+
   it('a job abandoned after its last attempt fails; an earlier attempt stays reclaimable', async () => {
     const [last, earlier] = await Promise.all([adminCreateCase(admin, 'Abandoned job 1'), adminCreateCase(admin, 'Abandoned job 2')]);
     await withQueueLock(async () => {

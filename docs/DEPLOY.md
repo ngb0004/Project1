@@ -27,6 +27,12 @@ Check afterwards that `pg_cron` and `pg_jsonschema` are enabled
 (`select extname from pg_extension`) and that the two cron jobs exist
 (`select jobname from cron.job`).
 
+Where the database port is unreachable (some sandboxes), apply each file in
+order through the Management API (`POST /v1/projects/<ref>/database/query`),
+one transaction per file, and insert its `version` and `name` into
+`supabase_migrations.schema_migrations` in the same transaction so a later
+`db push` skips it. The first deploy was applied this way.
+
 If the Supabase GitHub integration is connected with "Deploy to production",
 merging into `master` applies the same migrations; run `db push` only once.
 
@@ -85,8 +91,18 @@ done
 npx eas-cli build --platform android --profile preview --non-interactive
 ```
 
-`EXPO_PUBLIC_SHARE_BASE_URL` needs the public web origin once the web build is
-hosted. iOS builds need the owner's Apple Developer account and a one-time
+The web build is hosted on EAS Hosting at `https://dive.expo.app`, which is
+also `EXPO_PUBLIC_SHARE_BASE_URL` for native builds:
+
+```sh
+cd apps/mobile
+EXPO_PUBLIC_SUPABASE_URL=https://sbzxnzlfgiqiwgyagdet.supabase.co \
+EXPO_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_bLglFGR3PAnCNehrsZMg_Q_7k3v_iuR \
+  npx expo export --platform web
+npx eas-cli deploy --prod --non-interactive
+```
+
+iOS builds need the owner's Apple Developer account and a one-time
 credentials setup on expo.dev.
 
 ## 6. Admin console and worker

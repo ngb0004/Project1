@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { readSupabaseEnv } from '../env';
+import { isHttpsRequest, sessionCookieOptions } from './cookie-options';
 import { isAdminUser } from '../roles';
 
 /** Paths that work without a session. */
@@ -21,6 +22,7 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(url, anonKey, {
+    cookieOptions: sessionCookieOptions(isHttpsRequest(request.headers.get('x-forwarded-proto'), request.nextUrl.protocol)),
     cookies: {
       getAll() {
         return request.cookies.getAll();
@@ -47,14 +49,21 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
     return r;
   };
 
+  // A server action (a POST carrying Next's action header) is never redirected:
+  // a redirect there reaches the page as "an unexpected response" and throws away
+  // the review screen's unsaved working copy. Every action checks the session
+  // itself (adminForAction / requireAdmin) and answers with a typed error.
+  const isServerAction = request.method === 'POST' && request.headers.has('next-action');
+
   if (user && !isAdminUser(user)) {
     await supabase.auth.signOut({ scope: 'local' });
+    if (isServerAction) return response;
     const target = new URL('/login', request.url);
     target.searchParams.set('error', 'not_authorized');
     return redirectTo(target);
   }
 
-  if (!user && !isPublicPath(pathname)) {
+  if (!user && !isPublicPath(pathname) && !isServerAction) {
     const target = new URL('/login', request.url);
     if (pathname !== '/') target.searchParams.set('next', `${pathname}${search}`);
     return redirectTo(target);

@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { safeNextPath } from '@/lib/roles';
 import { LoginForm } from './LoginForm';
 
-export const metadata: Metadata = { title: 'Sign in · Review console' };
+export const metadata: Metadata = { title: 'Sign in' };
 
 const NOTICES: Record<string, string> = {
   not_authorized: 'Not authorized. This console is for the owner’s admin account only; you have been signed out.',

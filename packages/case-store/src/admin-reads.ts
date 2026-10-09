@@ -1,4 +1,4 @@
-import type { SeedProfile } from '@sia/case-schema';
+import type { CaseStatus, SeedProfile } from '@sia/case-schema';
 import { StoreError, type Db } from './index';
 
 /**
@@ -48,19 +48,29 @@ export interface VersionSummaryRow {
   case_id: string;
   slug: string;
   version: number;
-  status: string;
+  status: CaseStatus;
+  origin: 'pipeline' | 'admin' | 'import';
+  tags: string[];
+  parent_version: number | null;
+  based_on_version: number | null;
   title: string;
   as_of: string;
+  created_at: string;
+  submitted_at: string | null;
   published_at: string | null;
+  scheduled_publish_at: string | null;
   is_live: boolean | null;
 }
+
+const VERSION_SUMMARY_COLUMNS =
+  'case_id, slug, version, status, origin, tags, parent_version, based_on_version, title, as_of, created_at, submitted_at, published_at, scheduled_publish_at, is_live';
 
 export async function listVersionSummaries(db: Db, caseIds: string[]): Promise<VersionSummaryRow[]> {
   if (caseIds.length === 0) return [];
   return unwrap(
     await db
       .from('staff_case_versions')
-      .select('case_id, slug, version, status, title, as_of, published_at, is_live')
+      .select(VERSION_SUMMARY_COLUMNS)
       .in('case_id', caseIds)
       .order('version', { ascending: false }),
   ) as VersionSummaryRow[];
@@ -175,11 +185,90 @@ export interface ResearchLogRow {
   created_at: string;
 }
 
-/** Every query run, page opened and claim extracted by one pipeline job, in order. */
-export async function listResearchLog(db: Db, jobId: string, limit = 5000): Promise<ResearchLogRow[]> {
-  return unwrap(
-    await db.from('research_log').select('*').eq('job_id', jobId).order('id', { ascending: true }).limit(limit),
-  ) as ResearchLogRow[];
+/**
+ * PostgREST returns at most `max_rows` rows per request (1,000 on the local
+ * stack), whatever `.limit()` asks for. Reads that must be complete page
+ * through with `.range()` until a short page comes back.
+ */
+const PAGE_ROWS = 1000;
+
+async function selectAllPages<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string; code?: string; details?: unknown } | null }>, cap = 200_000): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; from < cap; from += PAGE_ROWS) {
+    const rows = unwrap(await page(from, from + PAGE_ROWS - 1)) ?? [];
+    out.push(...rows);
+    if (rows.length < PAGE_ROWS) break;
+  }
+  return out;
+}
+
+/** Every query run, page opened and claim extracted by one pipeline job, in order (all of it, paged). */
+export async function listResearchLog(db: Db, jobId: string): Promise<ResearchLogRow[]> {
+  return selectAllPages<ResearchLogRow>((from, to) =>
+    db.from('research_log').select('*').eq('job_id', jobId).order('id', { ascending: true }).range(from, to),
+  );
+}
+
+export interface ResearchLogGroup {
+  agent: string;
+  scope: string | null;
+  round: number;
+  /** Rows per kind (query, open, claim, note). */
+  counts: Record<string, number>;
+  total: number;
+}
+
+export interface ResearchLogSummary {
+  /** Every row the job logged. */
+  total: number;
+  /** One group per agent, scope and round, in the order the job first logged them. */
+  groups: ResearchLogGroup[];
+}
+
+/** Counts per agent, scope, round and kind, read in pages of small columns (no text), so the whole log is counted. */
+export async function researchLogSummary(db: Db, jobId: string): Promise<ResearchLogSummary> {
+  const rows = await selectAllPages<{ agent: string; scope: string | null; round: number; kind: string }>((from, to) =>
+    db.from('research_log').select('agent, scope, round, kind').eq('job_id', jobId).order('id', { ascending: true }).range(from, to),
+  );
+  const groups = new Map<string, ResearchLogGroup>();
+  for (const r of rows) {
+    const key = `${r.agent}\u0000${r.scope ?? ''}\u0000${r.round}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = { agent: r.agent, scope: r.scope, round: r.round, counts: {}, total: 0 };
+      groups.set(key, g);
+    }
+    g.counts[r.kind] = (g.counts[r.kind] ?? 0) + 1;
+    g.total++;
+  }
+  return { total: rows.length, groups: [...groups.values()] };
+}
+
+/** One page of one group of a job's research log, in order. */
+export async function listResearchLogPage(
+  db: Db,
+  jobId: string,
+  group: { agent: string; scope: string | null; round: number },
+  offset: number,
+  limit: number,
+): Promise<ResearchLogRow[]> {
+  let q = db.from('research_log').select('*').eq('job_id', jobId).eq('agent', group.agent).eq('round', group.round);
+  q = group.scope === null ? q.is('scope', null) : q.eq('scope', group.scope);
+  return unwrap(await q.order('id', { ascending: true }).range(offset, offset + Math.max(1, limit) - 1)) as ResearchLogRow[];
+}
+
+/** Which of `urls` the job logged as opened (kind = 'open'), checked in the database for every URL. */
+export async function researchLogOpenedUrls(db: Db, jobId: string, urls: string[]): Promise<Set<string>> {
+  const unique = [...new Set(urls.filter(Boolean))];
+  const out = new Set<string>();
+  for (let i = 0; i < unique.length; i += 40) {
+    const chunk = unique.slice(i, i + 40);
+    const rows = await selectAllPages<{ url: string | null }>((from, to) =>
+      db.from('research_log').select('url').eq('job_id', jobId).eq('kind', 'open').in('url', chunk).range(from, to),
+    );
+    for (const r of rows) if (r.url) out.add(r.url);
+  }
+  return out;
 }
 
 export interface SourceSnapshotMeta {
@@ -205,15 +294,17 @@ export async function getSourceSnapshot(db: Db, snapshotId: string): Promise<Sou
   return rows[0] ?? null;
 }
 
-/** Snapshot metadata (without the page text) for one job. */
+/** Snapshot metadata (without the page text) for one job (all of it, paged). */
 export async function listSnapshotMeta(db: Db, jobId: string): Promise<SourceSnapshotMeta[]> {
-  return unwrap(
-    await db
+  return selectAllPages<SourceSnapshotMeta>((from, to) =>
+    db
       .from('source_snapshots')
       .select('id, job_id, url, final_url, http_status, content_type, title, sha256, fetched_at')
       .eq('job_id', jobId)
-      .order('fetched_at', { ascending: true }),
-  ) as SourceSnapshotMeta[];
+      .order('fetched_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +364,25 @@ export async function adminFairnessSignals(db: Db, caseId: string, version: numb
   return { sides: raw?.sides ?? [], flags: raw?.flags ?? [], alerts: raw?.alerts ?? [] };
 }
 
+/**
+ * Marks readers' open fact flags on one step of one version as reviewed. Row-level
+ * security allows this only for the admin, and only resolved_at / resolved_by are
+ * writable. Returns how many flags were marked.
+ */
+export async function adminResolveFactFlags(db: Db, caseId: string, version: number, stepId: string, actor: string): Promise<number> {
+  const rows = unwrap(
+    await db
+      .from('fact_flags')
+      .update({ resolved_at: new Date().toISOString(), resolved_by: actor })
+      .eq('case_id', caseId)
+      .eq('case_version', version)
+      .eq('step_id', stepId)
+      .is('resolved_at', null)
+      .select('id'),
+  ) as { id: number }[];
+  return rows.length;
+}
+
 export interface FlagsBySideRow {
   step_id: string;
   /** The flagger's own side from the fairness question, or "unrated". */
@@ -283,4 +393,90 @@ export interface FlagsBySideRow {
 export async function adminFlagsBySide(db: Db, caseId: string, version: number): Promise<FlagsBySideRow[]> {
   return (unwrap(await db.rpc('admin_flags_by_side', { p_case_id: caseId, p_version: version })) ??
     []) as FlagsBySideRow[];
+}
+
+// ---------------------------------------------------------------------------
+// Crowd readouts (admin RPCs)
+// ---------------------------------------------------------------------------
+
+export interface AdminFinalCrowdStep {
+  step_id: string;
+  mean_delta: number | null;
+  mean_abs_delta: number | null;
+  moved_share: number;
+}
+
+export interface AdminVersionNote {
+  version: number;
+  published_at: string | null;
+  parent_version: number | null;
+  earlier_versions: { version: number; published_at: string | null; completions: number }[];
+}
+
+/** app.final_crowd plus real completions and the version note, as admin_final_crowd returns it. */
+export interface AdminFinalCrowd {
+  n_real: number;
+  n_seed: number;
+  /** How much each seeded row counts now (1 = full, 0 = faded or left out). */
+  seed_weight: number;
+  /** Share of the total weight that comes from seeded rows (0..1). */
+  seeded_share: number;
+  /** Ten 10-point bins (shares), or null when nobody counts. */
+  before_histogram: number[] | null;
+  after_histogram: number[] | null;
+  mean_before: number | null;
+  mean_after: number | null;
+  steps: AdminFinalCrowdStep[];
+  top_step_id: string | null;
+  real_completions: number;
+  version_note: AdminVersionNote | null;
+}
+
+export async function adminFinalCrowd(db: Db, caseId: string, version: number, includeSeed = true): Promise<AdminFinalCrowd> {
+  const raw = unwrap(
+    await db.rpc('admin_final_crowd', { p_case_id: caseId, p_version: version, p_include_seed: includeSeed }),
+  ) as Partial<AdminFinalCrowd> | null;
+  return {
+    n_real: Number(raw?.n_real ?? 0),
+    n_seed: Number(raw?.n_seed ?? 0),
+    seed_weight: Number(raw?.seed_weight ?? 0),
+    seeded_share: Number(raw?.seeded_share ?? 0),
+    before_histogram: raw?.before_histogram ?? null,
+    after_histogram: raw?.after_histogram ?? null,
+    mean_before: raw?.mean_before ?? null,
+    mean_after: raw?.mean_after ?? null,
+    steps: raw?.steps ?? [],
+    top_step_id: raw?.top_step_id ?? null,
+    real_completions: Number(raw?.real_completions ?? 0),
+    version_note: raw?.version_note ?? null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Admin edit drafts and job control
+// ---------------------------------------------------------------------------
+
+/** The admin's open edit draft derived from `baseVersion`, if there is one (the draft admin_save_edit would continue). */
+export async function findAdminEditDraft(db: Db, caseId: string, baseVersion: number): Promise<number | null> {
+  const rows = unwrap(
+    await db
+      .from('staff_case_versions')
+      .select('version')
+      .eq('case_id', caseId)
+      .eq('based_on_version', baseVersion)
+      .eq('status', 'draft')
+      .eq('origin', 'admin')
+      .contains('tags', ['admin_edit'])
+      .order('version', { ascending: false })
+      .limit(1),
+  ) as { version: number }[];
+  return rows[0]?.version ?? null;
+}
+
+/** Cancels a job that no worker has claimed yet. Row-level security allows only the admin, and only queued -> cancelled. */
+export async function adminCancelJob(db: Db, jobId: string): Promise<void> {
+  const rows = unwrap(
+    await db.from('pipeline_jobs').update({ status: 'cancelled' }).eq('id', jobId).eq('status', 'queued').select('id'),
+  ) as { id: string }[];
+  if (rows.length === 0) throw new StoreError(`job ${jobId} is not queued (or not visible)`, 'PT409');
 }

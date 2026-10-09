@@ -31,3 +31,24 @@ export const requireAdmin = cache(async (): Promise<AdminSession> => {
   }
   return { db, userId: user.id, email: user.email ?? user.id };
 });
+
+export const SESSION_ENDED =
+  'Your session ended (signed out in another tab, or it expired). Sign in again in a new tab, then retry here: your edits on this page are kept.';
+
+/**
+ * For server actions called from the review screen: the signed-in admin, or a
+ * typed error instead of a redirect, so the page (and its unsaved working
+ * copy) stays as it is and can retry after the owner signs in again.
+ */
+export async function adminForAction(): Promise<{ ok: true; session: AdminSession } | { ok: false; error: string }> {
+  const db = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await db.auth.getUser();
+  if (!user) return { ok: false, error: SESSION_ENDED };
+  if (!isAdminUser(user)) {
+    await db.auth.signOut({ scope: 'local' }).catch(() => undefined);
+    return { ok: false, error: 'Not authorized: this console is for the owner’s admin account only.' };
+  }
+  return { ok: true, session: { db, userId: user.id, email: user.email ?? user.id } };
+}

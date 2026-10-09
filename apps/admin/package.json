@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start --port 3100",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "tsx e2e/admin.e2e.mts",
+    "e2e:smoke": "tsx test/e2e/smoke.mts"
   },
   "dependencies": {
     "@sia/case-schema": "workspace:*",

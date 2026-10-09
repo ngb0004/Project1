@@ -337,3 +337,18 @@ describe('seeds fade case-wide', () => {
     expect(crowd.data.version_note.earlier_versions).toEqual([expect.objectContaining({ version, completions: 2 })]);
   });
 });
+
+describe('scheduled admin edits', () => {
+  it('supersede the package they were edited from when they go live', async () => {
+    const { case_id, version } = await submitFixture(pipeline);
+    const doc = (await getStaffVersion(admin, case_id, version))!.doc;
+    const edit = await adminSaveEdit(admin, case_id, version, { ...doc, title: 'Scheduled edit' });
+    await adminSchedule(admin, case_id, edit.version, new Date(Date.now() + 2500));
+    await new Promise((r) => setTimeout(r, 3000));
+    await sql(`select app.publish_due_versions()`);
+    expect(await statusOf(case_id, edit.version)).toBe('published');
+    expect(await statusOf(case_id, version)).toBe('archived');
+    const [d] = await sql(`select action, actor from public.review_decisions where case_id = $1 and version = $2 order by id desc limit 1`, [case_id, version]);
+    expect(d).toEqual({ action: 'superseded', actor: 'system:schedule' });
+  });
+});

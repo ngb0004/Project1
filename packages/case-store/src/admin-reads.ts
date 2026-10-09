@@ -420,9 +420,8 @@ export async function adminFlagsBySide(db: Db, caseId: string, version: number):
 
 export interface AdminFinalCrowdStep {
   step_id: string;
-  mean_delta: number | null;
-  mean_abs_delta: number | null;
-  moved_share: number;
+  /** Shares (0..1) of finished readers who agreed, were not sure, or disagreed; null when nobody counts. */
+  votes: { agree: number; unsure: number; disagree: number } | null;
 }
 
 export interface AdminVersionNote {
@@ -446,7 +445,8 @@ export interface AdminFinalCrowd {
   mean_before: number | null;
   mean_after: number | null;
   steps: AdminFinalCrowdStep[];
-  top_step_id: string | null;
+  /** The fact where agree and disagree were closest to even. */
+  most_split_step_id: string | null;
   real_completions: number;
   version_note: AdminVersionNote | null;
 }
@@ -465,7 +465,7 @@ export async function adminFinalCrowd(db: Db, caseId: string, version: number, i
     mean_before: raw?.mean_before ?? null,
     mean_after: raw?.mean_after ?? null,
     steps: raw?.steps ?? [],
-    top_step_id: raw?.top_step_id ?? null,
+    most_split_step_id: raw?.most_split_step_id ?? null,
     real_completions: Number(raw?.real_completions ?? 0),
     version_note: raw?.version_note ?? null,
   };

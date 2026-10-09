@@ -179,7 +179,7 @@ async function main() {
   await adminSetSeedProfile(admin, caseId, {
     sessions: 120,
     before_bins: [2, 3, 5, 8, 12, 14, 16, 16, 14, 10],
-    steps: { s1: { move_share: 0.4, mean_shift: 8, spread: 5 }, s3: { move_share: 0.5, mean_shift: -12, spread: 6 } },
+    steps: { s1: { agree: 3, unsure: 1, disagree: 1 }, s3: { agree: 1, unsure: 1, disagree: 3 } },
     fade_after_real_completions: 500,
     rng_seed: 7,
   });

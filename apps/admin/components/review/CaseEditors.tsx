@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useMemo } from 'react';
-import { CONFIDENCE_LEVELS, SOURCE_TYPES, type Fact, type Side, type Source } from '@sia/case-schema';
+import { CHECK_VERDICTS, CONFIDENCE_LEVELS, SOURCE_TYPES, TAKE_LENSES, type Fact, type Side, type Source, type Take } from '@sia/case-schema';
 import { safeHref } from '@/lib/format';
 import type { FactCheckFlag } from '@/lib/step-flags';
 import {
@@ -10,8 +10,10 @@ import {
   insertAt,
   moveAt,
   newFact,
+  newCheck,
   newSide,
   newSource,
+  newTake,
   removeAt,
   renameFactId,
   renameSideId,
@@ -24,6 +26,8 @@ import { FactCheckItem } from './FlagsPanel';
 import { EvidenceEditor } from './StepCard';
 
 const CONFIDENCE_OPTIONS = CONFIDENCE_LEVELS.map((c) => ({ value: c, label: c }));
+const LENS_OPTIONS = TAKE_LENSES.map((l) => ({ value: l, label: l }));
+const VERDICT_OPTIONS = CHECK_VERDICTS.map((v) => ({ value: v, label: v.replace('_', ' ') }));
 const SOURCE_TYPE_OPTIONS = SOURCE_TYPES.map((t) => ({ value: t, label: t.replace('_', ' ') }));
 const EMPTY: never[] = [];
 
@@ -58,7 +62,12 @@ export const CaseCardEditor = memo(function CaseCardEditor() {
           <TextField path={['as_of']} label="Facts current as of" type="date" />
           <TextField path={['content_warning']} label="Content warning" optional max={400} hint="Shown before the dive starts." />
         </div>
-        <TextField path={['question', 'prompt']} label="The question" max={240} />
+        <TextField
+          path={['question', 'prompt']}
+          label="The question"
+          max={240}
+          hint="One plain statement about what people are arguing over, rated from Disagree to Agree."
+        />
         <div className="fields-2">
           <TextField path={['question', 'scale', 'left_label']} label="Slider left label (0)" max={80} />
           <TextField path={['question', 'scale', 'right_label']} label="Slider right label (100)" max={80} />
@@ -180,6 +189,96 @@ export const SidesEditor = memo(function SidesEditor() {
         {readOnly ? null : (
           <button type="button" className="btn btn-small" onClick={() => update((d) => insertAt(d, ['sides'], sides.length, newSide(d)))}>
             + Add side
+          </button>
+        )}
+      </div>
+    </details>
+  );
+});
+
+const TakeItem = memo(function TakeItem({ take, index, count, ids }: { take: Take; index: number; count: number; ids: string[] }) {
+  const { update } = useEditor();
+  const readOnly = useReadOnly();
+  const checks = take.checks ?? EMPTY;
+  return (
+    <div className="sub-item" id={fieldDomId(`takes.${index}`)} tabIndex={-1}>
+      <div className="sub-item-head">
+        <span className="small faint">
+          Take {index + 1} · {take.lens}
+        </span>
+        <span className="spacer" />
+        <ItemTools
+          index={index}
+          count={count}
+          noun="take"
+          onMove={(to) => update((d) => moveAt(d, ['takes'], index, to))}
+          onRemove={() => update((d) => removeAt(d, ['takes'], index))}
+        />
+      </div>
+      <div className="fields-3">
+        <SelectField path={['takes', index, 'lens']} label="Lens" options={LENS_OPTIONS} />
+        <TextField path={['takes', index, 'label']} label="Label" max={80} />
+        <IdField
+          path={['takes', index, 'id']}
+          label="Take id"
+          taken={ids}
+          rename={(_from, to) => update((d) => ({ ...d, takes: (d.takes ?? []).map((t, i) => (i === index ? { ...t, id: to } : t)) }))}
+        />
+      </div>
+      <TextField path={['takes', index, 'summary']} label="The take, in its own voice" multiline max={600} />
+      <TextField path={['takes', index, 'seen_on']} label="Seen on" optional max={160} hint="Where readers run into it, e.g. TikTok, Instagram, Fox News." />
+      <SourceIdsField path={['takes', index, 'source_ids']} />
+      <div className="subsection">
+        <h4>Checks</h4>
+        {checks.map((c, j) => (
+          <div key={j} className="sub-item" id={fieldDomId(`takes.${index}.checks.${j}`)} tabIndex={-1}>
+            <div className="sub-item-head">
+              <span className="small faint">Check {j + 1}</span>
+              <span className="spacer" />
+              <ItemTools
+                index={j}
+                count={checks.length}
+                noun="check"
+                onMove={(to) => update((d) => moveAt(d, ['takes', index, 'checks'], j, to))}
+                onRemove={() => update((d) => removeAt(d, ['takes', index, 'checks'], j))}
+              />
+            </div>
+            <TextField path={['takes', index, 'checks', j, 'claim']} label="Claim" multiline max={300} />
+            <SelectField path={['takes', index, 'checks', j, 'verdict']} label="Verdict" options={VERDICT_OPTIONS} />
+            <TextField path={['takes', index, 'checks', j, 'note']} label="Why" multiline max={400} />
+            <SourceIdsField path={['takes', index, 'checks', j, 'source_ids']} />
+            <EvidenceEditor path={['takes', index, 'checks', j, 'evidence']} citedIds={c.source_ids ?? EMPTY} />
+          </div>
+        ))}
+        {readOnly || checks.length >= 6 ? null : (
+          <button type="button" className="btn btn-small" onClick={() => update((d) => insertAt(d, ['takes', index, 'checks'], checks.length, newCheck()))}>
+            + Add check
+          </button>
+        )}
+      </div>
+    </div>
+  );
+});
+
+export const TakesEditor = memo(function TakesEditor() {
+  const { update } = useEditor();
+  const readOnly = useReadOnly();
+  const takes = useDoc((d) => d.takes ?? EMPTY);
+  const ids = useIds(takes);
+  return (
+    <details className="card" open id={fieldDomId('takes')}>
+      <CardHeader path="takes" title={`How it is told online (${takes.length})`} />
+      <div className="card-body">
+        <p className="small muted">
+          The story as the left, the center and the right tell it on social media, each in its own voice, then each claim checked.
+          Public posts may show what is being said, but a verdict needs reporting or records behind it.
+        </p>
+        {takes.map((t, i) => (
+          <TakeItem key={i} take={t} index={i} count={takes.length} ids={ids} />
+        ))}
+        {readOnly ? null : (
+          <button type="button" className="btn btn-small" onClick={() => update((d) => insertAt(d, ['takes'], takes.length, newTake(d)))}>
+            + Add take
           </button>
         )}
       </div>

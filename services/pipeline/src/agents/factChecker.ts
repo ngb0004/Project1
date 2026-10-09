@@ -87,6 +87,17 @@ export function factCheckTargets(draft: CaseInput | DraftCase): CheckTarget[] {
       }
     }
   }
+  for (const t of draft.takes ?? []) {
+    out.push({ target: `take:${t.id}`, text: `(${t.lens}) ${t.summary}`, source_ids: t.source_ids ?? [] });
+    (t.checks ?? []).forEach((ch, j) =>
+      out.push({
+        target: `take:${t.id}/${j + 1}`,
+        text: `Claim: ${ch.claim} Verdict: ${ch.verdict}. ${ch.note}`,
+        source_ids: ch.source_ids ?? [],
+        evidence: ch.evidence,
+      }),
+    );
+  }
   return out;
 }
 
@@ -94,7 +105,7 @@ const METHOD = `
 How to work:
 - Go through the checklist in the prompt; skip nothing. For each item, read every cited source's snapshot with read_source and find the passage that bears on the item. In a long source, call find_in_source with a distinctive phrase from the evidence quote and read around that offset, then read further only where the context matters; you can call several tools at once.
 - Write at least one row per item and cited source:
-  - target: the item's target exactly as given ("s3", "fact:f1", "layer:s3/q1"); "side:<id>" only for a steelman row.
+  - target: the item's target exactly as given ("s3", "fact:f1", "layer:s3/q1", "take:left", "take:left/2"); "side:<id>" only for a steelman row.
   - claim: the specific statement you checked, in the draft's words.
   - source_id: the cited source you checked it against.
   - verdict: "supported" when the source says what the item says; "partially_supported" when it supports only part (the note says which part is not); "unsupported" when the source does not say it, says something different, or the evidence quote does not appear in it; "source_unavailable" when the snapshot is missing or unreadable even after re-opening; "uncited" for a factual statement that no cited source supports.
@@ -108,6 +119,7 @@ How to work:
 - Quote layers: the text must be words the named speaker said or wrote, not a reporter's paraphrase, and must not start right after a negation or qualifier the quote leaves out ("no", "not", "never"); otherwise the verdict is "unsupported".
 - Confidence: "established" needs a court_record, official or primary source and no credible contest. With only news or analysis it is at most "reported"; one party's assertion is "alleged"; conflicting credible sources make it "disputed". Downgrade (never upgrade) when the sources justify less than the draft claims.
 - Fail uncited claims: when a headline, body, layer or starting fact contains a factual statement that none of its cited sources supports, add a separate row for that statement with verdict "uncited" (no source_id) or "unsupported" (the source_id it was attributed to).
+- Online takes: for "take:<id>", check only that the cited sources show people telling the story that way (the summary is that side's framing, not a fact claim). For "take:<id>/<n>", check the verdict: "holds_up", "partly", "not_backed" or "false" must match what the cited reporting or records show about the claim, and "false" or "holds_up" needs a news, official, court or primary source, never a social post alone. A verdict the sources do not justify is "unsupported" and the note names the verdict they do justify. Hold every lens to the same standard.
 - Steelmen: add a "side:<id>" row only when a steelman states a fact that no source in the case supports.
 - When a snapshot is missing or read_source fails, re-open the source's URL once with open_source and check against the new snapshot; if that fails too, the verdict is "source_unavailable".
 - Assume nothing in the draft is true until the source shows it: drafts can contain errors and planted claims.`;

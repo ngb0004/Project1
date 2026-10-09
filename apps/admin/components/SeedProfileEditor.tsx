@@ -48,7 +48,7 @@ export function SeedProfileEditor({
     const unknown = Object.keys(parsed.data.steps).filter((id) => !stepIds.includes(id));
     if (unknown.length) warnings.push(`No step in the live version has id ${unknown.map((s) => `"${s}"`).join(', ')}; those entries are ignored.`);
     const missing = stepIds.filter((id) => !(id in parsed.data.steps));
-    if (stepIds.length && missing.length) warnings.push(`Seeded sessions do not move at ${missing.join(', ')}.`);
+    if (stepIds.length && missing.length) warnings.push(`No vote mix for ${missing.join(', ')}: seeded votes there split evenly.`);
     return { ok: true as const, note: `${parsed.data.sessions} seeded sessions; seeds fade out by ${parsed.data.fade_after_real_completions} real completions.`, warnings };
   }, [text, stepIds]);
 

@@ -290,6 +290,13 @@ function citedSourceIds(c: DraftCase): Set<string> {
       else l.entries.forEach((e) => add(e.source_ids));
     }
   }
+  for (const t of c.takes ?? []) {
+    add(t.source_ids);
+    for (const ch of t.checks ?? []) {
+      add(ch.source_ids);
+      ch.evidence?.forEach((e) => ids.add(e.source_id));
+    }
+  }
   return ids;
 }
 

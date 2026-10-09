@@ -250,7 +250,7 @@ const STEP_S5: Step = {
   impact: 'medium',
   source_ids: ['src-news-2'],
   confidence: 'reported',
-  micro_poll: { prompt: 'Does this change your position?', re_ask_slider: true },
+  micro_poll: { statement: 'This changes the picture.' },
 };
 
 const STEP_S6: Step = {
@@ -263,7 +263,7 @@ const STEP_S6: Step = {
   impact: 'medium',
   source_ids: ['src-minutes'],
   confidence: 'established',
-  micro_poll: { prompt: 'Does this change your position?', re_ask_slider: true },
+  micro_poll: { statement: 'This changes the picture.' },
 };
 
 /** A revision package the pipeline writes against the live version (as a scheduled update would). */
@@ -408,7 +408,7 @@ async function main() {
   await adminSetSeedProfile(admin, caseId, {
     sessions: 120,
     before_bins: [2, 3, 5, 8, 12, 14, 16, 16, 14, 10],
-    steps: { s1: { move_share: 0.4, mean_shift: 8, spread: 5 }, s3: { move_share: 0.5, mean_shift: -12, spread: 6 } },
+    steps: { s1: { agree: 3, unsure: 1, disagree: 1 }, s3: { agree: 1, unsure: 1, disagree: 3 } },
     fade_after_real_completions: 500,
     rng_seed: 11,
   });
@@ -522,13 +522,13 @@ async function main() {
     await visible(preview.getByTestId('step-screen'));
     assert.ok((await phoneText()).includes(fixture.steps[0]!.headline), 'step 1 shows its headline');
     assert.equal(await preview.getByTestId('reveal').count(), 0, 'the crowd is hidden before the reader commits');
-    await preview.getByTestId('slider').focus();
-    for (let i = 0; i < 2; i++) await page.keyboard.press('PageDown');
+    assert.ok((await phoneText()).includes(fixture.steps[0]!.micro_poll.statement), 'step 1 shows its fact-vote statement');
+    await preview.getByTestId('vote-agree').click();
     await shot(phone, '07-preview-step-1');
     await preview.getByTestId('poll-commit').click();
     await visible(preview.getByTestId('reveal'));
     const mirror = await preview.getByTestId('mirror').innerText();
-    assert.match(mirror, new RegExp(`${beforeValue}`), 'the personal mirror starts from the before answer');
+    assert.match(mirror, /^You agreed/, 'the reveal starts from the reader\'s own vote');
     await visible(preview.getByTestId('seeded-note'));
     await preview.getByTestId('reveal').scrollIntoViewIfNeeded();
     await shot(phone, '08-preview-step-1-reveal');
@@ -541,7 +541,7 @@ async function main() {
     await shot(phone, '08b-preview-transparency');
     await preview.getByTestId('dive-back').first().click();
     await visible(preview.getByTestId('case-card'));
-    ok(`preview (DiveFlow via react-native-web): case card -> starting facts -> before (${beforeValue}) -> step 1 commit -> reveal ("${mirror.replace(/\s+/g, ' ').trim()}", seeded crowd); hidden before commit; restart; "How this dive was made" opens the transparency page`);
+    ok(`preview (DiveFlow via react-native-web): case card -> starting facts -> before (${beforeValue}) -> step 1 vote -> reveal ("${mirror.replace(/\s+/g, ' ').trim()}", seeded crowd); hidden before commit; restart; "How this dive was made" opens the transparency page`);
 
     // Step list with sources, confidence, favors and flags.
     assert.equal(await page.locator('[data-testid^="step-card-"]').count(), 4);

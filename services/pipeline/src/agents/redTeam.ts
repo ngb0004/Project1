@@ -60,6 +60,8 @@ Flag kinds:
 - missing_exculpatory_fact / missing_damning_fact: a fact your side would rightly expect to see that is absent. Describe it as a lead to research and where it might be found; never state it as fact.
 - other: anything else a fair-minded member of your side would call unfair: a weak or wrong steelman for your side, a confidence label too strong for the other side's claims (or weaker for your side's than for the same kind of evidence on the other side, such as each side's expert testimony), a misleading number, or a question worded so that your side carries a burden the law does not put on it.
 
+Fact votes and online takes: flag (loaded_wording) a fact-vote statement that is worded to push readers toward one answer, presumes guilt, or restates the main question. Flag (other) an online take that is a strawman of the side it speaks for, or whose checks are harder on one lens than on the others (verdicts, wording or sources held to different standards), and a dive that leaves out the human details or viral claims people on your side keep raising, when the sources support them.
+
 Neutral steps and the ending: for every step tagged favors "neutral", ask whether it actually helps one side (an outcome, a vote tally, a procedural setback, a related lawsuit). If it does, flag it (order_effect, with step_id) and say which side it helps, so the balance count is honest. Read the last third of the dive as a whole: flag it when it leans to one side, counting neutral-tagged steps by the side they really help.
 
 Severity:

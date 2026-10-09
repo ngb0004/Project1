@@ -194,7 +194,7 @@ export const StepCard = memo(function StepCard({
           )}
         </div>
         <TextField path={['steps', index, 'headline']} label="Headline" max={160} className="input-headline" />
-        <TextField path={['steps', index, 'body']} label="Body" multiline max={1000} hint="2–4 sentences, plain words, no judging adjectives." />
+        <TextField path={['steps', index, 'body']} label="Body" multiline max={450} hint="1–3 short sentences in everyday words (about 8th-grade reading level). Detail goes in Go deeper." />
         <div className="fields-3">
           <SelectField path={['steps', index, 'confidence']} label="Confidence" options={CONFIDENCE_OPTIONS} />
           <SelectField path={['steps', index, 'favors']} label="Favors (admin-only)" options={favorsOptions} optional emptyLabel="Untagged" />
@@ -202,7 +202,12 @@ export const StepCard = memo(function StepCard({
           <IdField path={['steps', index, 'id']} label="Step id" taken={stepIds} rename={(from, to) => update((d) => renameStepId(d, from, to))} />
         </div>
         <SourceIdsField path={['steps', index, 'source_ids']} />
-        <TextField path={['steps', index, 'micro_poll', 'prompt']} label="Micro-poll prompt" max={200} />
+        <TextField
+          path={['steps', index, 'micro_poll', 'statement']}
+          label="Fact vote statement"
+          max={200}
+          hint="One plain statement readers agree or disagree with, e.g. “The DA should have read her full interview.”"
+        />
 
         <div className="subsection" id={fieldDomId(`${path}.depth`)} tabIndex={-1}>
           <h4>

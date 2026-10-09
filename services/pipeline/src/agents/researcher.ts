@@ -64,7 +64,7 @@ Each claim:
 - quote: the verbatim span from the snapshot that supports the text.
 - snapshot_id and url: from the open_source call for that page.
 - source_title, publisher, source_date: from the page itself. source_date is the publication date (YYYY, YYYY-MM or YYYY-MM-DD), or null when the page shows none.
-- source_type: court_record (filings, dockets, indictments, rulings, verdicts, transcripts, exhibits); official (government agencies, police, prosecutors, regulators, official reports and statements); primary (first-hand material from the people or organizations involved: their own statements, documents, data, video); news (reporting by news organizations); analysis (opinion, commentary, explainers, advocacy).
+- source_type: court_record (filings, dockets, indictments, rulings, verdicts, transcripts, exhibits); official (government agencies, police, prosecutors, regulators, official reports and statements); primary (first-hand material from the people or organizations involved: their own statements, documents, data, video); news (reporting by news organizations); analysis (opinion, commentary, explainers, advocacy); social (a public social media post, used only as evidence of what people are saying, never of what happened).
 - event_date: when the event in the claim happened (same formats), or null.
 - confidence: "established" only when a court record, official or primary source shows it and nothing credible contests it; "reported" when the support is news or analysis only; "alleged" when it rests on one party's assertion (a charge, a lawsuit, an accusation, a denial); "disputed" when credible sources contradict each other.
 - favors: the id of the side this fact helps, or "neutral".
@@ -82,6 +82,8 @@ const METHOD = `
 - Also log the facts that cut against your side, with favors set to the side they help. An honest advocate knows the weak points; the dive needs them, and the red team will look for them.
 - For each key event, find how the other side describes it too, including what happened before and after it (for example each side's account of a defendant's conduct afterwards), so that a contested account is never presented as agreed.
 - A claim says only what its quote supports. Never stretch a quote, and never fill a gap from memory.
+- Cover the human story, not only the paperwork: what the people involved say happened in their own words, what was said to or about them, how they were treated afterward, and the details people keep repeating online. Reporting that quotes texts, interviews, hearings or filings is the place to find these. Log a detail only from a source that reports it, attributed to whoever said it, and never name a private accused person.
+- Check the online claims in the outline's "online" list that bear on your side: log what reporting or records show about each one (true, partly true, false, or not known), and log a fact-check or a report about the online conversation when you find one.
 
 Aim for 8 to 20 claims from at least 4 different publishers, including at least 2 that cut against your side when they exist. Prefer fewer solid claims over many thin ones, and avoid paywalled pages.
 ${CLAIM_RULES}

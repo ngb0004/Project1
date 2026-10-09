@@ -19,7 +19,7 @@ import { isNegation, matchQuote, normalizeForMatch, wordsBeforeQuote } from './r
 export type CitationVerdict = Extract<FactCheckVerdict, 'uncited' | 'unsupported' | 'source_unavailable'>;
 
 export interface CitationFailure {
-  /** Step id, `fact:<id>`, `layer:<step>/<layer>`, or `source:<id>` for a listed source nothing cites. */
+  /** Step id, `fact:<id>`, `layer:<step>/<layer>`, `take:<id>` or `take:<id>/<n>` (a take's nth check), or `source:<id>` for a listed source nothing cites. */
   target: string;
   claim: string;
   source_id?: string;
@@ -143,6 +143,12 @@ export function checkCitations(input: AnyCase, store: SourceStore): CitationFail
           break;
       }
     }
+  }
+
+  // Online takes: each must cite where it is being said, and each check is held to the same quote rules as a step.
+  for (const t of c.takes ?? []) {
+    for (const sid of t.source_ids ?? []) opened(`take:${t.id}`, t.summary, sid);
+    (t.checks ?? []).forEach((ch, j) => checkItem(`take:${t.id}/${j + 1}`, ch.claim, ch.source_ids, ch.evidence));
   }
 
   for (const src of c.sources ?? []) {

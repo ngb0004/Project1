@@ -3,7 +3,7 @@ import type { CaseInput } from '@sia/case-schema';
 import { checkCitations, quoteLayerProblem } from '../src/factcheck';
 import { URLS, memoryStore } from './helpers';
 
-const poll = { prompt: 'Does this change your position?', re_ask_slider: true as const };
+const poll = { statement: 'This fact matters.' };
 
 /** A small case citing three of the fixture pages. */
 function caseFixture(): CaseInput {

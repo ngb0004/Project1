@@ -211,13 +211,14 @@ export default async function CasePage({ params, searchParams }: { params: Promi
               ) : null}
             </div>
             <div className="panel">
-              <h4>Movement per step</h4>
+              <h4>Fact votes (finished readers)</h4>
               <table>
                 <thead>
                   <tr>
-                    <th>Step</th>
-                    <th className="num">Mean shift</th>
-                    <th className="num">Moved</th>
+                    <th>Fact</th>
+                    <th className="num">Agree</th>
+                    <th className="num">Not sure</th>
+                    <th className="num">Disagree</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -225,10 +226,11 @@ export default async function CasePage({ params, searchParams }: { params: Promi
                     <tr key={s.step_id}>
                       <td className="small">
                         {stepHeadline.get(s.step_id) ?? s.step_id}
-                        {crowd.top_step_id === s.step_id ? <span className="badge badge-info" style={{ marginLeft: 6 }}>moved the crowd most</span> : null}
+                        {crowd.most_split_step_id === s.step_id ? <span className="badge badge-info" style={{ marginLeft: 6 }}>split the crowd most</span> : null}
                       </td>
-                      <td className="num">{s.mean_delta ?? '—'}</td>
-                      <td className="num">{formatPercent(s.moved_share)}</td>
+                      <td className="num">{s.votes ? formatPercent(s.votes.agree) : '—'}</td>
+                      <td className="num">{s.votes ? formatPercent(s.votes.unsure) : '—'}</td>
+                      <td className="num">{s.votes ? formatPercent(s.votes.disagree) : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -405,7 +407,7 @@ export default async function CasePage({ params, searchParams }: { params: Promi
           <div className="panel">
             <h4>Seeded crowd</h4>
             <p className="small muted">
-              A Before distribution plus a per-step shift. Seeded rows are stored as seeded, flagged in every readout, and fade out as real completions arrive. Saving regenerates the seeds for the live version.
+              A Before distribution, a vote mix for each fact, and a shift from Before to After. Seeded rows are stored as seeded, flagged in every readout, and fade out as real completions arrive. Saving regenerates the seeds for the live version.
             </p>
             <SeedProfileEditor caseId={caseId} initial={c.seed_profile} stepIds={(liveDoc?.doc.steps ?? []).map((s) => s.id)} />
           </div>

@@ -148,6 +148,7 @@ export function outline(slug = 'maple-county-water-main'): Outline {
     must_answer: ['When did the council learn the main was in poor condition?', 'How much grant money did the county lose?'],
     content_warning: null,
     timeline: [],
+    online: [],
     notes: 'Fictional fixture.',
   };
 }
@@ -265,7 +266,7 @@ export function buildDraft(input: DrafterInput, ctx: AgentContext, opts: DraftOp
         source_ids: [sourceIdFor(c.url)],
         confidence: conf(c),
         evidence: [{ source_id: sourceIdFor(c.url), quote: c.quote }],
-        micro_poll: { prompt: 'Does this change your position?', re_ask_slider: true as const },
+        micro_poll: { statement: 'This fact matters.' },
       })),
   ];
   if (opts.plantFabrication) {
@@ -281,7 +282,7 @@ export function buildDraft(input: DrafterInput, ctx: AgentContext, opts: DraftOp
       source_ids: [sourceIdFor(first.url)],
       confidence: 'reported',
       evidence: [{ source_id: sourceIdFor(first.url), quote: FABRICATED_QUOTE }],
-      micro_poll: { prompt: 'Does this change your position?', re_ask_slider: true },
+      micro_poll: { statement: 'This fact matters.' },
     });
   }
   steps.forEach((s, i) => (s.order = i + 1));
@@ -311,6 +312,7 @@ export function buildDraft(input: DrafterInput, ctx: AgentContext, opts: DraftOp
     // A revision or update keeps the base steelmen; a first draft writes them from the outline.
     sides: (base?.sides as DraftCase['sides'] | undefined)?.map((s) => ({ ...s })) ??
       input.outline.sides.map((s) => ({ id: s.id, label: s.label, steelman: `Supporters argue: ${s.position}` })),
+    takes: [],
     open_questions: (base?.open_questions as string[] | undefined) ?? ['What did the council know before the June 2025 vote?'],
     sources: [...sources.values()],
   };

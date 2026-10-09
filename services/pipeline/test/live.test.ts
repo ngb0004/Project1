@@ -71,7 +71,7 @@ describe.skipIf(!live)('ClaudeAgentRunner (live)', () => {
         'Return a minimal fictional case about a made-up town council vote, clearly labeled FICTIONAL in the title: ' +
         'id "probe", slug "probe-case", status "draft", version 1, as_of "2026-01-01", one starting fact, two steps (order 1 and 2), ' +
         'two sides with ids "side-a" and "side-b", one source with id "src-1" (url https://example.org/probe, type "official", date "2026", ' +
-        'accessed_at "2026-01-01T00:00:00Z") cited by every fact and step, and micro_poll {"prompt": "Does this change your position?", "re_ask_slider": true}.',
+        'accessed_at "2026-01-01T00:00:00Z") cited by every fact and step, and micro_poll {"statement": "This fact matters."}.',
       output: DraftCase,
     };
     const store = new SourceStore({ log: new MemoryResearchLog() });

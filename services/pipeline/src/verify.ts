@@ -90,6 +90,7 @@ function quoteCount(c: Case): number {
     n += s.evidence?.length ?? 0;
     n += s.depth.filter((l) => l.kind === 'quote').length;
   }
+  for (const t of c.takes ?? []) for (const ch of t.checks ?? []) n += ch.evidence?.length ?? 0;
   return n;
 }
 

@@ -22,7 +22,7 @@ import {
 import { addStep, contentOf, isContentDirty, isDirty, reviewEditsOf, setAt, setOptionalText, withManagedFields, type Doc, type Path } from '@/lib/working-copy';
 import { ActionsPanel, type RunWrite } from './ActionsPanel';
 import { BalancePanel } from './BalancePanel';
-import { CaseCardEditor, OpenQuestionsEditor, SidesEditor, SourcesEditor, StartingFactsEditor } from './CaseEditors';
+import { CaseCardEditor, OpenQuestionsEditor, SidesEditor, SourcesEditor, TakesEditor, StartingFactsEditor } from './CaseEditors';
 import { DiffView } from './DiffView';
 import { EditorContext, EditorStore, IssueIndex, ReviewContext, type EditorApi, type ReviewContextValue } from './editor-context';
 import { CaseFlags } from './FlagsPanel';
@@ -547,6 +547,7 @@ export function ReviewWorkspace({
                   </button>
                 )}
                 <SidesEditor />
+                <TakesEditor />
                 <OpenQuestionsEditor />
                 <SourcesEditor />
               </section>

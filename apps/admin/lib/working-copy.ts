@@ -1,6 +1,6 @@
 import {
-  DEFAULT_MICRO_POLL_PROMPT,
   LocalId,
+  TAKE_LENSES,
   deepEqual,
   type Case,
   type Fact,
@@ -10,6 +10,8 @@ import {
   type Side,
   type Source,
   type Step,
+  type Take,
+  type TakeCheck,
 } from '@sia/case-schema';
 
 /**
@@ -168,7 +170,7 @@ export function newStep(doc: Doc): Step {
     depth: [],
     source_ids: [],
     confidence: 'reported',
-    micro_poll: { prompt: DEFAULT_MICRO_POLL_PROMPT, re_ask_slider: true },
+    micro_poll: { statement: '' },
   };
 }
 
@@ -198,6 +200,24 @@ export function newFact(doc: Doc): Fact {
 
 export function newSide(doc: Doc): Side {
   return { id: uniqueId('side', (doc.sides ?? []).map((s) => s.id)), label: '', steelman: '' };
+}
+
+/** A blank online take for the first lens the case does not have yet. */
+export function newTake(doc: Doc): Take {
+  const takes = doc.takes ?? [];
+  const lens = TAKE_LENSES.find((l) => !takes.some((t) => t.lens === l)) ?? 'center';
+  return {
+    id: uniqueId(lens, takes.map((t) => t.id)),
+    lens,
+    label: `How the ${lens === 'center' ? 'middle' : lens} is telling it`,
+    summary: '',
+    source_ids: [],
+    checks: [newCheck()],
+  };
+}
+
+export function newCheck(): TakeCheck {
+  return { claim: '', verdict: 'unknown', note: '', source_ids: [] };
 }
 
 export function newSource(doc: Doc, now: Date = new Date()): Source {
@@ -268,6 +288,15 @@ export function renameSourceId(doc: Doc, from: string, to: string): Doc {
       if (s.evidence) next.evidence = ev(s.evidence);
       return next;
     }),
+    takes: (doc.takes ?? []).map((t) => ({
+      ...t,
+      source_ids: swapAll(t.source_ids, from, to) ?? [],
+      checks: (t.checks ?? []).map((c) => {
+        const next: TakeCheck = { ...c, source_ids: swapAll(c.source_ids, from, to) ?? [] };
+        if (c.evidence) next.evidence = ev(c.evidence);
+        return next;
+      }),
+    })),
   };
   if (doc.review) {
     out.review = {
@@ -391,6 +420,12 @@ export function citationsBySource(doc: Doc): Map<string, string[]> {
       else if (l.kind === 'context') for (const id of l.source_ids ?? []) add(id, where);
       else for (const e of l.entries ?? []) for (const id of e.source_ids ?? []) add(id, where);
     }
+  }
+  for (const t of doc.takes ?? []) {
+    for (const id of t.source_ids ?? []) add(id, `take ${t.id}`);
+    (t.checks ?? []).forEach((c, i) => {
+      for (const id of c.source_ids ?? []) add(id, `take ${t.id} › check ${i + 1}`);
+    });
   }
   return out;
 }

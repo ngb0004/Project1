@@ -138,7 +138,7 @@ function itemLines(kind: Kind, item: Item, sourceTitle: (id: string) => string):
     add('Favors', item.favors);
     add('Impact', item.impact);
     add('Sources', cites(item.source_ids));
-    add('Micro-poll', (item.micro_poll as Item | undefined)?.prompt);
+    add('Fact vote', (item.micro_poll as Item | undefined)?.statement);
     (Array.isArray(item.evidence) ? (item.evidence as Item[]) : []).forEach((e, i) => add(`Evidence ${i + 1}`, `“${String(e.quote ?? '')}” (${String(e.source_id ?? '')})`));
     (Array.isArray(item.depth) ? (item.depth as Item[]) : []).forEach((l) => {
       for (const [k, v] of layerLines(l)) out.push([`Depth › ${String(l.kind)} ${String(l.id)} › ${k}`, v]);

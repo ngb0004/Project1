@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { assertValidCase, toPublicCase, type PublicCase } from '@sia/case-schema';
-import { DiveFlow, testIds } from '@sia/dive-ui';
+import { DiveFlow, testIds, voteOptionId } from '@sia/dive-ui';
 import { createFakeApi } from './fakeApi';
 
 /**
@@ -112,21 +112,31 @@ describe.each(fixtures.map((d) => [d.slug, d] as const))('%s on react-native-web
       await find(testIds.stepScreen);
       expect(container.textContent).toContain(step.headline);
       expect(query(testIds.reveal)).toBeNull();
-      expect(container.textContent).not.toContain('moved here');
+      expect(container.textContent).not.toContain('What everyone else said');
       if (step.depth.length > 0) {
         expect((await find(testIds.goDeeper)).getAttribute('aria-expanded')).toBe('false');
         await click(testIds.goDeeper);
         expect((await find(testIds.goDeeper)).getAttribute('aria-expanded')).toBe('true');
       }
-      await key(testIds.slider, 'ArrowLeft');
+      // The three answers are an ARIA radio group; nothing is checked until the reader picks.
+      const agree = await find(voteOptionId('agree'));
+      expect(agree.getAttribute('role')).toBe('radio');
+      expect(agree.getAttribute('aria-checked')).toBe('false');
+      expect((await find(testIds.pollCommit)).getAttribute('aria-disabled')).toBe('true');
+      await click(voteOptionId('agree'));
+      expect((await find(voteOptionId('agree'))).getAttribute('aria-checked')).toBe('true');
       await click(testIds.pollCommit);
       const reveal = await find(testIds.reveal);
       expect(query(testIds.crowdChart)).not.toBeNull();
-      // The fake crowd is 99% seeded, so the sentence says "this crowd", not "readers".
-      expect(container.textContent).toContain('of this crowd moved here');
-      // Focus moves to the start of the reveal: the personal mirror.
+      expect(container.textContent).toContain('What everyone else said');
+      // Focus moves to the start of the reveal: the reader's own vote.
       expect(reveal.contains(document.activeElement)).toBe(true);
-      expect(document.activeElement!.textContent).toMatch(/^You moved from|didn't move you/);
+      expect(document.activeElement!.textContent).toMatch(/^You agreed/);
+      await click(testIds.next);
+    }
+
+    if (doc.takes.length > 0) {
+      await find(testIds.takesScreen);
       await click(testIds.next);
     }
 
@@ -138,7 +148,7 @@ describe.each(fixtures.map((d) => [d.slug, d] as const))('%s on react-native-web
     const chart = await find(testIds.finalChart);
     expect(chart.querySelector('svg')).not.toBeNull();
     expect(chart.getAttribute('role')).toBe('img');
-    expect(chart.getAttribute('aria-label')).toMatch(/^Your answers, from first to last: 61, .*On average, the crowd went from 62 to 51\.$/);
+    expect(chart.getAttribute('aria-label')).toBe('Your answer went from 61 to 61. On average, the crowd went from 62 to 51.');
     await click(testIds.next);
 
     const card = await find(testIds.shareCard);

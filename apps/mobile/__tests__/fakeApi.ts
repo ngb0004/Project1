@@ -58,13 +58,7 @@ export function createFakeApi(docs: PublicCase[], opts: { versionNote?: Partial<
     n_seed: 400,
     seed_weight: 1,
     seeded_share: 0.99,
-    histogram: HISTOGRAM,
-    previous_histogram: HISTOGRAM,
-    mean_value: 58,
-    mean_previous: 62,
-    mean_delta: -4,
-    moved_share: 0.41,
-    shift: { left_big: 0.12, left: 0.2, none: 0.59, right: 0.06, right_big: 0.03 },
+    votes: { agree: 0.41, unsure: 0.22, disagree: 0.37 },
   });
 
   const finalCrowd = (doc: PublicCase): FinalCrowd => ({
@@ -76,8 +70,11 @@ export function createFakeApi(docs: PublicCase[], opts: { versionNote?: Partial<
     after_histogram: [...HISTOGRAM].reverse(),
     mean_before: 62,
     mean_after: 51,
-    steps: doc.steps.map((s, i) => ({ step_id: s.id, mean_delta: -i, mean_abs_delta: 3 + i, moved_share: 0.4 })),
-    top_step_id: doc.steps[doc.steps.length - 1]!.id,
+    steps: doc.steps.map((s, i) => ({
+      step_id: s.id,
+      votes: i === doc.steps.length - 1 ? { agree: 0.45, unsure: 0.1, disagree: 0.45 } : { agree: 0.8, unsure: 0.1, disagree: 0.1 },
+    })),
+    most_split_step_id: doc.steps[doc.steps.length - 1]!.id,
   });
 
   const reveal = (sessionId: string, slot: string, locked: boolean): Reveal => {
@@ -85,23 +82,13 @@ export function createFakeApi(docs: PublicCase[], opts: { versionNote?: Partial<
     const i = s.answers.findIndex((a) => a.step_id === slot);
     const value = s.answers[i]!.value;
     if (slot === 'before') return { step_id: 'before', value, locked };
-    const previous = s.answers[i - 1]!.value;
     if (slot === 'after') {
-      let top: string | null = null;
-      let best = 0;
-      s.answers.forEach((a, j) => {
-        const d = j > 0 ? Math.abs(a.value - s.answers[j - 1]!.value) : 0;
-        if (a.step_id !== 'before' && a.step_id !== 'after' && d > best) {
-          best = d;
-          top = a.step_id;
-        }
-      });
       return {
         step_id: 'after',
         value,
-        previous_value: previous,
+        previous_value: s.answers[0]!.value,
         locked,
-        you: { answers: [...s.answers], top_step_id: top },
+        you: { answers: [...s.answers] },
         crowd: finalCrowd(s.doc),
         version_note: versionNote(s.doc),
       };
@@ -109,7 +96,6 @@ export function createFakeApi(docs: PublicCase[], opts: { versionNote?: Partial<
     return {
       step_id: slot,
       value,
-      previous_value: previous,
       locked,
       crowd: stepCrowd(slot),
       version_note: versionNote(s.doc),

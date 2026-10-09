@@ -7,13 +7,16 @@ import {
   seededNoteText,
   stepById,
   versionNoteText,
+  voteKeyOf,
+  voteSplitText,
+  yourVoteText,
   type FinalReveal,
   type StepReveal,
   type VersionNote,
 } from '@sia/dive-engine';
 import { useFocusOnMount } from './a11y';
-import { JourneyChart, ShiftChart, bucketOf } from './charts';
-import { crowdStepDeltaText, finalCrowdSummary, journeyLabel, stepCrowdSummary, yourStepDeltaText } from './copy';
+import { JourneyChart, VoteSplitBars } from './charts';
+import { finalCrowdSummary, journeyLabel, standApart, standApartText } from './copy';
 import { useEntrance } from './motion';
 import { testIds } from './testIds';
 import { colors, fonts, space, type } from './theme';
@@ -82,40 +85,25 @@ function Mirror({ text, focusOnMount }: { text: string; focusOnMount: boolean })
   );
 }
 
-/** After a step's poll is committed: the personal mirror and how the crowd moved at this step. */
+/** After a fact vote is committed: the reader's vote and how everyone else voted on this fact. */
 export function StepRevealView({
   reveal,
-  doc,
   focusOnMount = false,
 }: {
   reveal: StepReveal;
-  doc: PublicCase;
+  doc?: PublicCase;
   focusOnMount?: boolean;
 }) {
-  const { left_label: left, right_label: right } = doc.question.scale;
   const { crowd } = reveal;
-  const summary = stepCrowdSummary(crowd, left, right);
   return (
     <RevealFrame testID={testIds.reveal}>
-      <Mirror text={mirrorText(reveal.previous_value, reveal.value)} focusOnMount={focusOnMount} />
-      <Kicker style={styles.kicker}>Everyone who reached this fact</Kicker>
-      {crowd.shift ? (
-        <>
-          <ShiftChart
-            shift={crowd.shift}
-            you={bucketOf(reveal.previous_value, reveal.value)}
-            leftLabel={left}
-            rightLabel={right}
-          />
-          {summary ? (
-            <Text style={type.body} testID={testIds.crowdSummary}>
-              {summary}
-            </Text>
-          ) : null}
-        </>
+      <Mirror text={yourVoteText(reveal.value, crowd.votes)} focusOnMount={focusOnMount} />
+      <Kicker style={styles.kicker}>What everyone else said</Kicker>
+      {crowd.votes ? (
+        <VoteSplitBars votes={crowd.votes} you={voteKeyOf(reveal.value)} />
       ) : (
         <Text style={type.body} testID={testIds.crowdEmpty}>
-          Not enough readers have reached this fact yet to show how the crowd moved.
+          You are one of the first to get here. Check back later to see how others voted.
         </Text>
       )}
       <CrowdNotes seededShare={crowd.seeded_share} nReal={crowd.n_real} versionNote={reveal.version_note} />
@@ -123,7 +111,7 @@ export function StepRevealView({
   );
 }
 
-/** The final reveal: the reader's path over the crowd, and the steps that moved each most. */
+/** The final reveal: the reader's Before and After over the crowd's, the most split fact, and where the reader stood apart. */
 export function FinalRevealView({
   reveal,
   doc,
@@ -134,29 +122,23 @@ export function FinalRevealView({
   focusOnMount?: boolean;
 }) {
   const { crowd, you } = reveal;
-  const path = you.answers.map((a) => a.value);
-  const before = you.answers.find((a) => a.step_id === 'before')?.value ?? path[0] ?? reveal.previous_value;
+  const before = you.answers.find((a) => a.step_id === 'before')?.value ?? reveal.previous_value;
   const crowdSummary = finalCrowdSummary(crowd);
   // With no completions the histograms come back as ten zeros rather than null.
   const hasCrowd = crowd.mean_before !== null;
+  const seeded = crowd.seeded_share > 0;
 
-  const yourTop = you.top_step_id ? stepById(doc, you.top_step_id) : undefined;
-  const yourTopIndex = you.answers.findIndex((a) => a.step_id === you.top_step_id);
-  const yourTopDelta =
-    yourTopIndex > 0 ? yourStepDeltaText(you.answers[yourTopIndex - 1]!.value, you.answers[yourTopIndex]!.value) : null;
-
-  // The API still names a top step (the first one) when the crowd did not move at all.
-  const crowdTopStat = crowd.steps.find((s) => s.step_id === crowd.top_step_id);
-  const crowdMoved = (crowdTopStat?.mean_abs_delta ?? 0) > 0;
-  const crowdTop = crowdMoved && crowd.top_step_id ? stepById(doc, crowd.top_step_id) : undefined;
-  const crowdTopDelta = crowdStepDeltaText(crowdTopStat?.mean_abs_delta ?? null, crowd.seeded_share);
+  const split = crowd.most_split_step_id ? stepById(doc, crowd.most_split_step_id) : undefined;
+  const splitVotes = crowd.steps.find((s) => s.step_id === crowd.most_split_step_id)?.votes ?? null;
+  const apart = standApart(you.answers, crowd);
+  const apartStep = apart ? stepById(doc, apart.stepId) : undefined;
 
   return (
     <RevealFrame testID={testIds.finalReveal}>
       <Mirror text={mirrorText(before, reveal.value)} focusOnMount={focusOnMount} />
       <JourneyChart
-        accessibilityLabel={journeyLabel(path, crowd)}
-        path={path}
+        accessibilityLabel={journeyLabel(before, reveal.value, crowd)}
+        path={[before, reveal.value]}
         beforeHistogram={hasCrowd ? crowd.before_histogram : null}
         afterHistogram={hasCrowd ? crowd.after_histogram : null}
         leftLabel={doc.question.scale.left_label}
@@ -170,28 +152,26 @@ export function FinalRevealView({
       ) : null}
       <CrowdNotes seededShare={crowd.seeded_share} nReal={crowd.n_real} versionNote={reveal.version_note} />
 
-      <View style={styles.topStep} testID={testIds.topStepYou}>
-        <Kicker>The fact that moved you most</Kicker>
-        {yourTop ? (
+      <View style={styles.topStep} testID={testIds.mostSplit}>
+        <Kicker>The fact people split on most</Kicker>
+        {split && splitVotes ? (
           <>
-            <Text style={styles.topHeadline}>{yourTop.headline}</Text>
-            {yourTopDelta ? <Text style={type.small}>{yourTopDelta}</Text> : null}
+            <Text style={styles.topHeadline}>{split.headline}</Text>
+            <Text style={type.small}>{voteSplitText(splitVotes)}</Text>
           </>
         ) : (
-          <Text style={type.body}>None of the facts moved you.</Text>
+          <Text style={type.body}>Not enough readers yet to say.</Text>
         )}
       </View>
-      <View style={styles.topStep} testID={testIds.topStepCrowd}>
-        <Kicker>The fact that moved everyone most</Kicker>
-        {crowdTop ? (
+      <View style={styles.topStep} testID={testIds.standApart}>
+        <Kicker>Where you stood apart</Kicker>
+        {apart && apartStep ? (
           <>
-            <Text style={styles.topHeadline}>{crowdTop.headline}</Text>
-            {crowdTopDelta ? <Text style={type.small}>{crowdTopDelta}</Text> : null}
+            <Text style={styles.topHeadline}>{apartStep.headline}</Text>
+            <Text style={type.small}>{standApartText(apart, seeded)}</Text>
           </>
         ) : (
-          <Text style={type.body}>
-            {crowdTopStat?.mean_abs_delta === 0 ? 'None of the facts moved the crowd.' : 'Not enough readers yet to say.'}
-          </Text>
+          <Text style={type.body}>Not enough readers yet to say.</Text>
         )}
       </View>
     </RevealFrame>

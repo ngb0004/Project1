@@ -52,7 +52,7 @@ function seedProfileFor(doc: Case) {
     sessions: 150,
     before_bins: [1, 1, 2, 3, 5, 6, 7, 5, 3, 2],
     steps: Object.fromEntries(
-      doc.steps.map((s, i) => [s.id, { move_share: 0.5, mean_shift: i % 2 ? -12 : 8, spread: 6 }]),
+      doc.steps.map((s, i) => [s.id, i % 2 ? { agree: 1, unsure: 1, disagree: 3 } : { agree: 3, unsure: 1, disagree: 1 }]),
     ),
     after: { move_share: 0.3, mean_shift: -3, spread: 4 },
     rng_seed: 7,

@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { CASE_STATUSES, CONFIDENCE_LEVELS, DEFAULT_MICRO_POLL_PROMPT, SOURCE_TYPES } from '@sia/case-schema';
+import { CASE_STATUSES, CHECK_VERDICTS, CONFIDENCE_LEVELS, SOURCE_TYPES, TAKE_LENSES } from '@sia/case-schema';
 import { loadFixtures } from './playThrough';
 
 /**
@@ -19,7 +19,12 @@ const VOCABULARY = new Set<string>([
   'timeline',
   'context',
   'slider',
-  DEFAULT_MICRO_POLL_PROMPT,
+  ...TAKE_LENSES,
+  ...CHECK_VERDICTS,
+  // generic answer words: the fact-vote buttons, and the usual slider labels
+  'agree',
+  'disagree',
+  'not sure',
 ]);
 
 function files(dir: string): string[] {
@@ -50,7 +55,7 @@ it('has source files to check', () => {
 });
 
 it.each(loadFixtures().map((d) => [d.slug, d] as const))('no string from %s appears in the source', (_slug, doc) => {
-  const distinctive = [...stringsOf(doc)].filter((s) => s.length >= 6 && !VOCABULARY.has(s));
+  const distinctive = [...stringsOf(doc)].filter((s) => s.length >= 6 && !VOCABULARY.has(s.toLowerCase()));
   expect(distinctive.length).toBeGreaterThan(20);
   const found = sources.flatMap(({ file, text }) =>
     distinctive.filter((s) => contains(text, s)).map((s) => `${file}: "${s}"`),

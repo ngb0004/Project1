@@ -10,6 +10,7 @@ export const SOURCE_TYPE_LABEL: Record<Source['type'], string> = {
   primary: 'Primary document',
   news: 'News',
   analysis: 'Analysis',
+  social: 'Social post',
 };
 
 export function ConfidenceLabel({ confidence, showHint = false }: { confidence: Confidence; showHint?: boolean }) {
@@ -27,7 +28,10 @@ export function sourcesById(doc: Pick<PublicCase, 'sources'>, ids: readonly stri
   return ids.map((id) => doc.sources.find((s) => s.id === id)).filter((s): s is Source => s !== undefined);
 }
 
-/** A compact citation line: each source as a link that opens its URL. */
+/**
+ * A compact citation line: "Sources: ABC News, NBC News", each name a link
+ * that opens the source. The full titles are on the transparency page.
+ */
 export function Citations({
   doc,
   ids,
@@ -41,18 +45,19 @@ export function Citations({
   if (sources.length === 0) return null;
   return (
     <View style={styles.citations}>
-      <Text style={type.small}>{sources.length === 1 ? 'Source' : 'Sources'}</Text>
-      {sources.map((s) => (
+      <Text style={type.small}>{sources.length === 1 ? 'Source:' : 'Sources:'}</Text>
+      {sources.map((s, i) => (
         <Pressable
           key={s.id}
           onPress={() => openUrl(s.url)}
           accessibilityRole="link"
-          accessibilityLabel={`${s.publisher}: ${s.title}`}
+          accessibilityLabel={`${s.publisher}: ${s.title}, ${formatDate(s.date)}`}
           testID={sourceLinkId(s.id)}
           hitSlop={4}
         >
           <Text style={[type.small, styles.citation]}>
-            {s.publisher}, <Text style={styles.citationTitle}>{s.title}</Text> ({formatDate(s.date)})
+            {s.publisher}
+            {i < sources.length - 1 ? ',' : ''}
           </Text>
         </Pressable>
       ))}
@@ -63,7 +68,6 @@ export function Citations({
 const styles = StyleSheet.create({
   confidence: { gap: space.xs },
   confidenceLabel: { color: colors.ink },
-  citations: { gap: 2 },
+  citations: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 6, rowGap: 2 },
   citation: { color: colors.muted, textDecorationLine: 'underline', textDecorationColor: colors.rule },
-  citationTitle: { fontStyle: 'italic' },
 });

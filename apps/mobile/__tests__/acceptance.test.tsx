@@ -1,9 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/react-native';
 import type { JsonElement, JsonNode } from 'test-renderer';
 import type { Case } from '@sia/case-schema';
-import { buildScreens, mirrorText, shareHeadline, type ScreenKind } from '@sia/dive-engine';
+import { VOTE_ORDER, VOTE_VALUE, buildScreens, mirrorText, shareHeadline, yourVoteText, type ScreenKind } from '@sia/dive-engine';
 import { LocalDiveApi } from '@sia/dive-engine/local';
-import { DiveFlow, depthLayerId, steelmanId, testIds } from '@sia/dive-ui';
+import { DiveFlow, depthLayerId, steelmanId, takeId, testIds, voteOptionId } from '@sia/dive-ui';
 import { loadFixtures } from './playThrough';
 
 /**
@@ -19,7 +19,7 @@ const seedProfile = (doc: Case) => ({
   sessions: 150,
   before_bins: [1, 1, 2, 3, 5, 6, 7, 5, 3, 2],
   steps: Object.fromEntries(
-    doc.steps.map((s, i) => [s.id, { move_share: 0.5, mean_shift: i % 2 ? -10 : 8, spread: 5 }]),
+    doc.steps.map((s, i) => [s.id, i % 2 ? { agree: 1, unsure: 1, disagree: 3 } : { agree: 3, unsure: 1, disagree: 1 }]),
   ),
   after: { move_share: 0.3, mean_shift: -3, spread: 4 },
   rng_seed: 11,
@@ -27,7 +27,7 @@ const seedProfile = (doc: Case) => ({
 
 /** Generic reveal copy (dive-ui and dive-engine): none of it may show before a commit. */
 const CROWD_TEXT =
-  /Everyone who reached|(readers|crowd) moved|held steady|seeded|No readers yet|\d+ readers?\b|You moved from|didn't move you|did not move|Everyone, (before|after)|moved everyone most|went from|stayed at|Your answers, from first/;
+  /What everyone else said|You (agreed|disagreed|weren't sure)|\d+% (agree|not sure|disagree)|seeded|No readers yet|\d+ readers?\b|one of the first|You moved from|ended where you started|Everyone, (before|after)|split on most|stood apart|went from|stayed at|Your answer went from/;
 
 /** Every string a reader (or a screen reader) can get from the current tree. */
 function renderedStrings(): string[] {
@@ -62,6 +62,7 @@ function adminOnlyStrings(doc: Case) {
     for (const e of s.evidence ?? []) values.add(e.quote);
   }
   for (const f of doc.starting_facts) for (const e of f.evidence ?? []) values.add(e.quote);
+  for (const t of doc.takes) for (const c of t.checks) for (const e of c.evidence ?? []) values.add(e.quote);
   return [...values];
 }
 
@@ -94,6 +95,7 @@ const SCREEN_TEST_ID: Record<ScreenKind, string> = {
   starting_facts: testIds.startingFacts,
   before: testIds.beforeScreen,
   step: testIds.stepScreen,
+  takes: testIds.takesScreen,
   after: testIds.afterScreen,
   final: testIds.finalScreen,
   share: testIds.shareScreen,
@@ -182,14 +184,14 @@ describe.each(fixtures.map((d) => [d.slug, d] as const))('%s', (_slug, doc) => {
     expectNoCrowd(); // Before has no crowd reveal of its own.
     await press(testIds.next);
 
-    let previous = before;
     for (const [i, step] of doc.steps.entries()) {
       await arrive(testIds.stepScreen);
       expect(screen.getByText(step.headline)).toBeOnTheScreen();
       expect(screen.getByText(step.body)).toBeOnTheScreen();
-      expect(screen.getByText(step.micro_poll.prompt)).toBeOnTheScreen();
+      expect(screen.getByText(step.micro_poll.statement)).toBeOnTheScreen();
       expect(screen.getByText(`Fact ${i + 1} of ${doc.steps.length}`)).toBeOnTheScreen();
-      expect(sliderValue()).toBe(previous); // pre-filled at the last answer
+      expect(screen.queryByTestId(testIds.slider)).toBeNull(); // a fact gets a vote, not the slider
+      expect(screen.getByTestId(testIds.pollCommit)).toBeDisabled(); // nothing picked yet
       expect(screen.queryByTestId(testIds.next)).toBeNull(); // no skipping an unanswered poll
 
       if (step.depth.length > 0) {
@@ -217,29 +219,43 @@ describe.each(fixtures.map((d) => [d.slug, d] as const))('%s', (_slug, doc) => {
 
       // Before commit: no crowd result of any kind.
       expectNoCrowd();
-      await nudge(i % 2 ? 'decrement' : 'increment');
-      const value = sliderValue();
+      const vote = VOTE_ORDER[i % 3]!;
+      await press(voteOptionId(vote));
       expectNoCrowd();
       await press(testIds.pollCommit);
 
-      // After commit: the personal mirror and the crowd's shift chart.
+      // After commit: the reader's vote and how everyone else voted.
       const reveal = await screen.findByTestId(testIds.reveal);
-      expect(within(reveal).getByTestId(testIds.mirror)).toHaveTextContent(mirrorText(previous, value));
+      const crowdVotes = (await api.getReveal((await api.startSession(loaded!.case_id, loaded!.version, deviceId)).session_id, step.id)) as {
+        crowd: { votes: null };
+      };
+      expect(within(reveal).getByTestId(testIds.mirror)).toHaveTextContent(yourVoteText(VOTE_VALUE[vote], crowdVotes.crowd.votes));
       expect(within(reveal).getByTestId(testIds.crowdChart)).toBeOnTheScreen();
-      expect(within(reveal).getByTestId(testIds.crowdSummary)).toBeOnTheScreen();
       expect(within(reveal).getByTestId(testIds.seededNote)).toBeOnTheScreen();
-      expect(within(reveal).getByText('Everyone who reached this fact')).toBeOnTheScreen();
-      expect(screen.getByTestId(testIds.slider)).toBeDisabled();
+      expect(within(reveal).getByText('What everyone else said')).toBeOnTheScreen();
+      expect(screen.getByTestId(voteOptionId(vote))).toBeDisabled();
       expect(renderedStrings().filter((t) => CROWD_TEXT.test(t)).length).toBeGreaterThan(3);
       seen.push(...renderedStrings());
-      previous = value;
+      await press(testIds.next);
+    }
+    getReveal.mockClear(); // the calls above were the test's own, not the app's
+
+    // How the story is told online: every take and every check, from the record.
+    if (doc.takes.length > 0) {
+      await arrive(testIds.takesScreen);
+      for (const t of doc.takes) {
+        const take = within(screen.getByTestId(takeId(t.id)));
+        expect(take.getByText(t.summary)).toBeOnTheScreen();
+        for (const c of t.checks) expect(take.getByText(c.claim)).toBeOnTheScreen();
+      }
+      expectNoCrowd();
       await press(testIds.next);
     }
 
     // After: same question; nothing about the crowd until it is locked.
     await arrive(testIds.afterScreen);
     expect(screen.getByText(doc.question.prompt)).toBeOnTheScreen();
-    expect(sliderValue()).toBe(previous);
+    expect(sliderValue()).toBe(before); // the fact votes do not move the main answer
     expectNoCrowd();
     for (let i = 0; i < 3; i++) await nudge('decrement');
     const after = sliderValue();
@@ -254,7 +270,7 @@ describe.each(fixtures.map((d) => [d.slug, d] as const))('%s', (_slug, doc) => {
     expect(within(final).getByTestId(testIds.finalChart)).toBeOnTheScreen();
     expect(within(final).getByTestId(testIds.seededNote)).toBeOnTheScreen();
     const stepHeadlines = doc.steps.map((s) => s.headline);
-    for (const id of [testIds.topStepYou, testIds.topStepCrowd]) {
+    for (const id of [testIds.mostSplit, testIds.standApart]) {
       const top = within(screen.getByTestId(id));
       expect(stepHeadlines.some((h) => top.queryByText(h) !== null)).toBe(true);
     }

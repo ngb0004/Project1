@@ -35,7 +35,7 @@ const doc: PublicCase = {
       depth: [{ kind: 'context', id: 'ctx', title: 'Some context', body: 'Context body.', source_ids: ['src-1'] }],
       source_ids: ['src-1'],
       confidence: 'reported',
-      micro_poll: { prompt: 'Does the first fact change your answer?', re_ask_slider: true },
+      micro_poll: { statement: 'The first fact matters.' },
     },
     {
       id: 'two',
@@ -45,13 +45,14 @@ const doc: PublicCase = {
       depth: [],
       source_ids: ['src-1'],
       confidence: 'disputed',
-      micro_poll: { prompt: 'And this one?', re_ask_slider: true },
+      micro_poll: { statement: 'The second fact matters.' },
     },
   ],
   sides: [
     { id: 'yes', label: 'It matters', steelman: 'The case for yes.' },
     { id: 'no', label: 'It does not', steelman: 'The case for no.' },
   ],
+  takes: [],
   open_questions: ['What is still unknown?'],
   sources: [SOURCE],
 };
@@ -109,7 +110,7 @@ describe('DiveFlow', () => {
     expect(calls(api, 'startSession')).toHaveLength(1);
     expect(screen.getByText('Where things stand')).toBeOnTheScreen();
     expect(screen.getByText('The baseline fact.')).toBeOnTheScreen();
-    expect(screen.getByText('Established')).toBeOnTheScreen();
+    expect(screen.getByText('Confirmed')).toBeOnTheScreen();
     await press(testIds.next);
 
     // 3. Before: commit locks the answer
@@ -127,8 +128,9 @@ describe('DiveFlow', () => {
     // 4. First step: nothing about the crowd before commit
     await screen.findByTestId(testIds.stepScreen);
     expect(screen.getByText('The first headline.')).toBeOnTheScreen();
-    expect(screen.getByText('Does the first fact change your answer?')).toBeOnTheScreen();
-    expect(sliderValue()).toBe(90); // pre-filled at the last answer
+    expect(screen.getByText('The first fact matters.')).toBeOnTheScreen();
+    expect(screen.queryByTestId(testIds.slider)).toBeNull(); // a fact gets a vote, not the slider
+    expect(screen.getByTestId(testIds.pollCommit)).toBeDisabled(); // nothing picked yet
     expect(screen.queryByTestId(testIds.reveal)).toBeNull();
     expect(screen.queryByTestId(testIds.crowdChart)).toBeNull();
     expect(screen.queryByTestId(testIds.next)).toBeNull();
@@ -153,28 +155,31 @@ describe('DiveFlow', () => {
     await press(testIds.flagCancel);
     expect(screen.queryByTestId(testIds.flagSheet)).toBeNull();
 
-    await nudge('decrement', 3);
+    await press('vote-agree');
+    await press('vote-disagree'); // can change the pick until it is locked in
+    expect(calls(api, 'submit')).toHaveLength(1); // only the Before answer so far
     await press(testIds.pollCommit);
     const reveal = await screen.findByTestId(testIds.reveal);
-    expect(within(reveal).getByText('You moved from 90 to 75.')).toBeOnTheScreen();
+    expect(within(reveal).getByText('You disagreed, like 37% of readers.')).toBeOnTheScreen();
     expect(within(reveal).getByTestId(testIds.crowdChart)).toBeOnTheScreen();
     expect(within(reveal).getByTestId(testIds.seededNote)).toBeOnTheScreen();
-    expect(within(reveal).getByText(/41% of this crowd moved here/)).toBeOnTheScreen();
+    expect(calls(api, 'submit')[1]!.args).toEqual(['session-1', 'one', 0]);
     await press(testIds.next);
 
-    // Second step: hidden again until commit; not moving is mirrored too
+    // Second step: hidden again until commit
     await screen.findByText('The second headline.');
     expect(screen.queryByTestId(testIds.reveal)).toBeNull();
     expect(screen.queryByTestId(testIds.goDeeper)).toBeNull(); // no depth layers
     expect(screen.getByTestId(testIds.flagLink)).toBeOnTheScreen();
+    await press('vote-unsure');
     await press(testIds.pollCommit);
-    expect(await screen.findByText("This didn't move you.")).toBeOnTheScreen();
+    expect(await screen.findByText("You weren't sure, like 22% of readers.")).toBeOnTheScreen();
 
     // Going back shows the committed step with its reveal, and the answer stays locked
     await press(testIds.back);
     await screen.findByText('The first headline.');
-    expect(screen.getByText('You moved from 90 to 75.')).toBeOnTheScreen();
-    expect(screen.getByTestId(testIds.slider)).toBeDisabled();
+    expect(screen.getByText('You disagreed, like 37% of readers.')).toBeOnTheScreen();
+    expect(screen.getByTestId('vote-agree')).toBeDisabled();
     expect(screen.queryByTestId(testIds.pollCommit)).toBeNull();
     await press(testIds.next);
     await screen.findByText('The second headline.');
@@ -182,8 +187,8 @@ describe('DiveFlow', () => {
 
     // 6. After
     expect(screen.getByTestId(testIds.afterScreen)).toBeOnTheScreen();
-    expect(sliderValue()).toBe(75);
-    await nudge('decrement', 1);
+    expect(sliderValue()).toBe(90); // starts where Before ended: the fact votes do not move it
+    await nudge('decrement', 4);
     await press(testIds.pollCommit);
     await screen.findByTestId(testIds.lockedNote);
     await press(testIds.next);
@@ -192,8 +197,10 @@ describe('DiveFlow', () => {
     const final = await screen.findByTestId(testIds.finalReveal);
     expect(within(final).getByText('You moved from 90 to 70.')).toBeOnTheScreen();
     expect(within(final).getByTestId(testIds.finalChart)).toBeOnTheScreen();
-    expect(within(screen.getByTestId(testIds.topStepYou)).getByText('The first headline.')).toBeOnTheScreen();
-    expect(within(screen.getByTestId(testIds.topStepCrowd)).getByText('The second headline.')).toBeOnTheScreen();
+    // the fake crowd split most on the last fact; the reader disagreed on the first, where 80% agreed
+    expect(within(screen.getByTestId(testIds.mostSplit)).getByText('The second headline.')).toBeOnTheScreen();
+    expect(within(screen.getByTestId(testIds.standApart)).getByText('The first headline.')).toBeOnTheScreen();
+    expect(within(screen.getByTestId(testIds.standApart)).getByText('You said disagree. 80% of the crowd said agree.')).toBeOnTheScreen();
     expect(screen.getByText('What is still unknown?')).toBeOnTheScreen();
     expect(screen.getByText('The case for yes.')).toBeOnTheScreen();
     expect(screen.getByText('The case for no.')).toBeOnTheScreen();
@@ -223,8 +230,8 @@ describe('DiveFlow', () => {
     expect(calls(api, 'getReveal')).toHaveLength(0);
     expect(calls(api, 'submit').map((c) => [c.args[1], c.args[2]])).toEqual([
       ['before', 90],
-      ['one', 75],
-      ['two', 75],
+      ['one', 0],
+      ['two', 50],
       ['after', 70],
     ]);
   });
@@ -249,14 +256,14 @@ describe('DiveFlow', () => {
     const api = createFakeApi([doc]);
     const first = await api.startSession(doc.id, doc.version, 'device-0123456789abcdef');
     await api.submit(first.session_id, 'before', 80);
-    await api.submit(first.session_id, 'one', 60);
+    await api.submit(first.session_id, 'one', 100);
     api.calls.length = 0;
 
     await renderFlow(api);
     await press(testIds.next);
     await screen.findByText('The second headline.');
     expect(screen.getByTestId(testIds.notice)).toBeOnTheScreen();
-    expect(sliderValue()).toBe(60);
+    expect(screen.getByTestId(testIds.pollCommit)).toBeDisabled(); // a fresh vote: nothing picked
     expect(screen.queryByTestId(testIds.reveal)).toBeNull();
     expect(calls(api, 'getReveal')).toHaveLength(0);
   });
@@ -266,8 +273,8 @@ describe('DiveFlow', () => {
     const first = await api.startSession(doc.id, doc.version, 'device-0123456789abcdef');
     for (const [slot, value] of [
       ['before', 40],
-      ['one', 45],
-      ['two', 55],
+      ['one', 0],
+      ['two', 100],
       ['after', 60],
     ] as const) {
       await api.submit(first.session_id, slot, value);
@@ -299,6 +306,7 @@ describe('DiveFlow', () => {
     await press(testIds.next);
     await screen.findByTestId(testIds.stepScreen);
     expect(screen.queryByTestId(testIds.versionNote)).toBeNull();
+    await press('vote-agree');
     await press(testIds.pollCommit);
     const note = await screen.findByTestId(testIds.versionNote);
     expect(note).toHaveTextContent('Updated Oct 12; 3,104 people saw the earlier version.');
@@ -334,7 +342,7 @@ function memoryStore(): DiveProgressStore & { data: Map<string, number> } {
   };
 }
 
-/** Begins, locks Before at 50 and lands on the first step. */
+/** Begins, locks Before at 50, lands on the first step and picks Agree (not yet locked in). */
 async function startDive(api: FakeApi, services: DiveServices = makeServices()) {
   await renderFlow(api, services);
   await press(testIds.next);
@@ -344,6 +352,7 @@ async function startDive(api: FakeApi, services: DiveServices = makeServices()) 
   await screen.findByTestId(testIds.lockedNote);
   await press(testIds.next);
   await screen.findByText('The first headline.');
+  await press('vote-agree');
 }
 
 describe('DiveFlow when a commit fails', () => {
@@ -361,7 +370,7 @@ describe('DiveFlow when a commit fails', () => {
     expect(screen.queryByTestId(testIds.next)).toBeNull();
     expect(screen.queryByTestId(testIds.reload)).toBeNull();
     expect(screen.getByTestId(testIds.pollCommit)).toBeEnabled();
-    expect(screen.getByTestId(testIds.slider)).toBeEnabled();
+    expect(screen.getByTestId('vote-disagree')).toBeEnabled();
 
     // Trying again commits, and only now shows the crowd.
     await press(testIds.pollCommit);
@@ -379,7 +388,7 @@ describe('DiveFlow when a commit fails', () => {
       await screen.findByTestId(testIds.reload);
       expect(screen.queryByTestId(testIds.pollCommit)).toBeNull();
       expect(screen.queryByTestId(testIds.reveal)).toBeNull();
-      expect(screen.getByTestId(testIds.slider)).toBeDisabled();
+      expect(screen.getByTestId('vote-agree')).toBeDisabled();
 
       api.calls.length = 0;
       await press(testIds.reload);
@@ -388,6 +397,7 @@ describe('DiveFlow when a commit fails', () => {
       expect(screen.getByTestId(testIds.notice)).toHaveTextContent(/Welcome back/);
       expect(calls(api, 'getCase')).toHaveLength(1);
       expect(calls(api, 'startSession')).toHaveLength(1);
+      await press('vote-agree');
       expect(screen.getByTestId(testIds.pollCommit)).toBeEnabled();
       expect(screen.queryByTestId(testIds.reveal)).toBeNull();
     },
@@ -462,6 +472,7 @@ describe('DiveFlow across a revision', () => {
     const services = { ...makeServices(), progress: memoryStore() };
     await startDive(api, services);
     for (let i = 0; i < 2; i++) {
+      if (i > 0) await press('vote-agree');
       await press(testIds.pollCommit);
       await screen.findByTestId(testIds.reveal);
       await press(testIds.next);
@@ -478,7 +489,7 @@ describe('DiveFlow re-fetching reveals', () => {
   async function resumeAtStepTwo(api: FakeApi) {
     const first = await api.startSession(doc.id, doc.version, 'device-0123456789abcdef');
     await api.submit(first.session_id, 'before', 80);
-    await api.submit(first.session_id, 'one', 60);
+    await api.submit(first.session_id, 'one', 100);
     api.calls.length = 0;
     await renderFlow(api);
     await press(testIds.next);
@@ -490,7 +501,7 @@ describe('DiveFlow re-fetching reveals', () => {
     await resumeAtStepTwo(api);
     expect(calls(api, 'getReveal')).toHaveLength(0);
     await press(testIds.back);
-    expect(await screen.findByText('You moved from 80 to 60.')).toBeOnTheScreen();
+    expect(await screen.findByText('You agreed, like 41% of readers.')).toBeOnTheScreen();
     expect(calls(api, 'getReveal').map((c) => c.args[1])).toEqual(['one']);
   });
 
@@ -502,12 +513,12 @@ describe('DiveFlow re-fetching reveals', () => {
       const down = () => new DiveApiError('network', 'offline');
       api.failNext('getReveal', down(), down(), down());
       await press(testIds.back);
-      expect(screen.getByText('Loading how everyone moved…')).toBeOnTheScreen();
+      expect(screen.getByText('Loading what others said…')).toBeOnTheScreen();
       await screen.findByTestId(testIds.retry, {}, { timeout: 20000 });
       expect(calls(api, 'getReveal')).toHaveLength(3);
       expect(screen.getByTestId(testIds.error)).toHaveTextContent(/^Couldn't reach the server\./);
       await press(testIds.retry);
-      expect(await screen.findByText('You moved from 80 to 60.')).toBeOnTheScreen();
+      expect(await screen.findByText('You agreed, like 41% of readers.')).toBeOnTheScreen();
       expect(calls(api, 'getReveal')).toHaveLength(4);
     } finally {
       jest.useRealTimers();
@@ -533,6 +544,7 @@ describe('ShareScreen', () => {
     await press(testIds.next);
     for (const screenId of [testIds.beforeScreen, testIds.stepScreen, testIds.stepScreen, testIds.afterScreen]) {
       await screen.findByTestId(screenId);
+      if (screenId === testIds.stepScreen) await press('vote-unsure');
       await press(testIds.pollCommit);
       await screen.findByTestId(screenId === testIds.stepScreen ? testIds.reveal : testIds.lockedNote);
       await press(testIds.next);
@@ -584,7 +596,7 @@ describe('ShareCard', () => {
     const api = createFakeApi([doc]);
     const s = await api.startSession(doc.id, doc.version, 'device-share-card');
     let last;
-    for (const slot of ['before', 'one', 'two', 'after']) last = await api.submit(s.session_id, slot, 40);
+    for (const slot of ['before', 'one', 'two', 'after']) last = await api.submit(s.session_id, slot, 50);
     const final = last as FinalReveal;
     const empty: FinalReveal = {
       ...final,

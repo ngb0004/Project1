@@ -26,12 +26,14 @@ export const testIds = {
   beforeScreen: 'before-screen',
   afterScreen: 'after-screen',
   stepScreen: 'step-screen',
+  takesScreen: 'takes-screen',
   finalScreen: 'final-screen',
   shareScreen: 'share-screen',
 
   slider: 'slider',
   sliderValue: 'slider-value',
   pollCommit: 'poll-commit',
+  vote: 'fact-vote',
   lockedNote: 'locked-note',
 
   confidence: 'confidence-label',
@@ -55,8 +57,8 @@ export const testIds = {
 
   finalReveal: 'final-reveal',
   finalChart: 'final-chart',
-  topStepYou: 'top-step-you',
-  topStepCrowd: 'top-step-crowd',
+  mostSplit: 'most-split',
+  standApart: 'stand-apart',
   openQuestions: 'open-questions',
   steelmen: 'steelmen',
   fairness: 'fairness',
@@ -76,6 +78,8 @@ export const testIds = {
   versionHistory: 'version-history',
 } as const;
 
+export const voteOptionId = (vote: string) => `vote-${vote}`;
+export const takeId = (takeId: string) => `take-${takeId}`;
 export const depthLayerId = (layerId: string) => `depth-layer-${layerId}`;
 export const sourceLinkId = (sourceId: string) => `source-link-${sourceId}`;
 export const flagReasonId = (reason: string) => `flag-reason-${reason}`;

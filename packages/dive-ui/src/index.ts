@@ -2,7 +2,7 @@ export { DiveFlow, type DiveFlowProps } from './DiveFlow';
 export { TransparencyPage } from './TransparencyPage';
 export { Slider, type SliderProps } from './Slider';
 export { ShareCard, SHARE_CARD_HEIGHT, SHARE_CARD_WIDTH } from './ShareCard';
-export { ShiftChart, Distribution, JourneyChart, bucketOf, type ShiftBucket } from './charts';
+export { VoteSplitBars, Distribution, JourneyChart } from './charts';
 export { StepRevealView, FinalRevealView } from './reveals';
 export { DepthLayers } from './DepthLayers';
 export { FlagSheet } from './FlagSheet';

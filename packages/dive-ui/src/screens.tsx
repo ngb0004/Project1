@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Platform, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
-import { AFTER, BEFORE, type PublicCase, type PublicStep } from '@sia/case-schema';
+import { Platform, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { AFTER, BEFORE, type PublicCase, type PublicStep, type PublicTake } from '@sia/case-schema';
 import {
+  CHECK_VERDICT_LABEL,
+  VOTE_LABEL,
+  VOTE_ORDER,
+  VOTE_VALUE,
+  voteKeyOf,
   estimateMinutes,
   formatDate,
   isCommitted,
@@ -23,7 +28,7 @@ import { ShareCard } from './ShareCard';
 import { Slider } from './Slider';
 import { Citations, ConfidenceLabel } from './Sources';
 import { errorMessage } from './copy';
-import { fairnessRatingId, fairnessSideId, steelmanId, testIds } from './testIds';
+import { fairnessRatingId, fairnessSideId, steelmanId, takeId, testIds, voteOptionId } from './testIds';
 import { colors, fonts, space, type } from './theme';
 import { Body, Button, Choice, Display, Headline, Kicker, Rule, Small, TextLink, Title } from './ui';
 
@@ -63,8 +68,8 @@ export function CaseCardScreen({
         <Title>{doc.question.prompt}</Title>
       </View>
       <Body style={styles.muted}>
-        Record your first answer. Walk through the facts one at a time and answer again after each. Then see how you
-        moved, and how everyone else did.
+        Give your gut answer first. Then go through the facts one at a time and say if you agree with each. At the
+        end, see how the whole story is being told online, answer again, and see where everyone else landed.
       </Body>
       {doc.content_warning ? (
         <View style={styles.warning} testID={testIds.contentWarning}>
@@ -150,11 +155,11 @@ function ReloadButton({ onReload }: { onReload: () => void }) {
   return <Button ref={ref} label="Reload the dive" onPress={onReload} testID={testIds.reload} />;
 }
 
-function LockedNote({ value, focusOnMount }: { value: number; focusOnMount: boolean }) {
+function LockedNote({ text, focusOnMount }: { text: string; focusOnMount: boolean }) {
   const ref = useFocusOnMount(focusOnMount);
   return (
     <View ref={ref} tabIndex={-1} accessible style={styles.focusTarget}>
-      <Small testID={testIds.lockedNote}>Locked at {value}. Answers can't be changed once they are in.</Small>
+      <Small testID={testIds.lockedNote}>{text} Answers can't be changed once they are in.</Small>
     </View>
   );
 }
@@ -185,7 +190,7 @@ function PollControls({
   events: PollEvents;
 }) {
   const committed = isCommitted(state, slot);
-  const value = committed ? state.answers[slot]! : (state.draft ?? pollDefault(state, slot));
+  const value = committed ? state.answers[slot]! : (state.draft ?? pollDefault(state, slot) ?? 50);
   return (
     <View style={styles.poll}>
       <Slider
@@ -198,7 +203,7 @@ function PollControls({
         accessibilityLabel={label}
       />
       {committed ? (
-        <LockedNote value={value} focusOnMount={events.justCommitted} />
+        <LockedNote text={`Locked at ${value}.`} focusOnMount={events.justCommitted} />
       ) : events.onReload ? (
         <ReloadButton onReload={events.onReload} />
       ) : (
@@ -286,6 +291,71 @@ export function QuestionScreen({
   );
 }
 
+/** The fact vote: one statement and three answers. Pick one, then lock it in. */
+function VotePanel({
+  state,
+  step,
+  onDraft,
+  onCommit,
+  events,
+}: {
+  state: DiveState;
+  step: PublicStep;
+  onDraft: (value: number) => void;
+  onCommit: () => void;
+  events: PollEvents;
+}) {
+  const committed = isCommitted(state, step.id);
+  const chosen = committed ? state.answers[step.id]! : state.draft;
+  const locked = committed || state.pending || Boolean(events.onReload);
+  return (
+    <View style={styles.poll} testID={testIds.vote}>
+      <View style={styles.group}>
+        <Kicker>Do you agree?</Kicker>
+        <Title>{step.micro_poll.statement}</Title>
+      </View>
+      <View style={styles.voteButtons} accessibilityRole="radiogroup" accessibilityLabel={step.micro_poll.statement}>
+        {VOTE_ORDER.map((k) => {
+          const selected = chosen === VOTE_VALUE[k];
+          return (
+            <Pressable
+              key={k}
+              onPress={() => onDraft(VOTE_VALUE[k])}
+              disabled={locked}
+              accessibilityRole="radio"
+              aria-checked={selected}
+              accessibilityState={{ disabled: locked, checked: selected }}
+              testID={voteOptionId(k)}
+              style={({ pressed }) => [
+                styles.voteButton,
+                selected && styles.voteButtonOn,
+                pressed && !locked && styles.voteButtonPressed,
+                locked && !selected && styles.voteButtonFaded,
+              ]}
+            >
+              <Text style={[styles.voteButtonLabel, selected && styles.voteButtonLabelOn]}>{VOTE_LABEL[k]}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {committed ? (
+        <LockedNote text={`Locked in: ${VOTE_LABEL[voteKeyOf(chosen!)!]}.`} focusOnMount={events.justCommitted} />
+      ) : events.onReload ? (
+        <ReloadButton onReload={events.onReload} />
+      ) : (
+        <Button
+          label={state.pending ? 'Locking in…' : 'Lock in and see what others said'}
+          onPress={onCommit}
+          disabled={state.pending || chosen === null}
+          testID={testIds.pollCommit}
+          accessibilityHint={chosen === null ? 'Pick an answer first' : undefined}
+        />
+      )}
+      {state.error ? <ErrorText message={state.error} /> : null}
+    </View>
+  );
+}
+
 export function StepScreen({
   state,
   doc,
@@ -321,14 +391,16 @@ export function StepScreen({
   const last = index === doc.steps.length - 1;
   return (
     <>
-      <View style={styles.group} testID={testIds.stepScreen}>
+      <View style={styles.stepTop} testID={testIds.stepScreen}>
         <Kicker>
           Fact {index + 1} of {doc.steps.length}
         </Kicker>
-        <ConfidenceLabel confidence={step.confidence} showHint />
+        <ConfidenceLabel confidence={step.confidence} />
       </View>
       <View style={styles.group}>
-        <Headline>{step.headline}</Headline>
+        <View style={styles.highlight}>
+          <Headline>{step.headline}</Headline>
+        </View>
         <Body>{step.body}</Body>
         <Citations doc={doc} ids={step.source_ids} openUrl={openUrl} />
       </View>
@@ -343,21 +415,8 @@ export function StepScreen({
           {expanded ? <DepthLayers doc={doc} layers={step.depth} openUrl={openUrl} /> : null}
         </View>
       ) : null}
-      <TextLink label="Flag this fact" onPress={onFlag} testID={testIds.flagLink} />
       <Rule />
-      <View style={styles.group}>
-        <Title>{step.micro_poll.prompt}</Title>
-        <Small>{doc.question.prompt}</Small>
-      </View>
-      <PollControls
-        state={state}
-        doc={doc}
-        slot={step.id}
-        label={step.micro_poll.prompt}
-        onDraft={onDraft}
-        onCommit={onCommit}
-        events={events}
-      />
+      <VotePanel state={state} step={step} onDraft={onDraft} onCommit={onCommit} events={events} />
       {reveal && isStepReveal(reveal) ? (
         <View onLayout={(e: LayoutChangeEvent) => onRevealLayout(e.nativeEvent.layout.y)}>
           <StepRevealView reveal={reveal} doc={doc} focusOnMount={events.justCommitted} />
@@ -365,11 +424,63 @@ export function StepScreen({
       ) : committed && revealFailure ? (
         <RevealError error={revealFailure} />
       ) : committed ? (
-        <Small>Loading how everyone moved…</Small>
+        <Small>Loading what others said…</Small>
       ) : null}
       {committed ? (
-        <Button label={last ? 'On to the final question' : 'Next fact'} onPress={onNext} testID={testIds.next} />
+        <Button
+          label={!last ? 'Next fact' : doc.takes.length > 0 ? 'How people are telling it' : 'On to the final question'}
+          onPress={onNext}
+          testID={testIds.next}
+        />
       ) : null}
+      <TextLink label="Something wrong with this fact? Flag it" onPress={onFlag} testID={testIds.flagLink} />
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// How the story is told online
+// ---------------------------------------------------------------------------
+
+const LENS_ORDER: PublicTake['lens'][] = ['left', 'center', 'right'];
+
+export function TakesScreen({
+  doc,
+  openUrl,
+  onNext,
+}: {
+  doc: PublicCase;
+  openUrl: (url: string) => void;
+  onNext: () => void;
+}) {
+  const takes = [...doc.takes].sort((a, b) => LENS_ORDER.indexOf(a.lens) - LENS_ORDER.indexOf(b.lens));
+  return (
+    <>
+      <View style={styles.group} testID={testIds.takesScreen}>
+        <Kicker>What you are seeing online</Kicker>
+        <Headline>How people are telling this story</Headline>
+        <Small>Each version in its own words, then what holds up and what does not.</Small>
+      </View>
+      {takes.map((t) => (
+        <View key={t.id} style={styles.take} testID={takeId(t.id)}>
+          <Title>{t.label}</Title>
+          {t.seen_on ? <Small>Seen on: {t.seen_on}</Small> : null}
+          <View style={styles.takeVoice}>
+            <Text style={styles.takeVoiceText}>{t.summary}</Text>
+          </View>
+          <Citations doc={doc} ids={t.source_ids} openUrl={openUrl} />
+          <Kicker style={styles.inkKicker}>Checked</Kicker>
+          {t.checks.map((c, i) => (
+            <View key={i} style={styles.check}>
+              <Text style={[type.caps, styles.verdict, styles[`verdict_${c.verdict}`]]}>{CHECK_VERDICT_LABEL[c.verdict]}</Text>
+              <Text style={type.body}>{c.claim}</Text>
+              <Text style={type.small}>{c.note}</Text>
+              <Citations doc={doc} ids={c.source_ids} openUrl={openUrl} />
+            </View>
+          ))}
+        </View>
+      ))}
+      <Button label="On to the final question" onPress={onNext} testID={testIds.next} />
     </>
   );
 }
@@ -640,6 +751,35 @@ const styles = StyleSheet.create({
   },
   factText: { fontFamily: fonts.serif, fontSize: 19, lineHeight: 28, color: colors.ink },
   poll: { gap: space.md },
+  stepTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: space.sm },
+  // The headline is the fact in one line; a soft marker band makes it the thing to read first.
+  highlight: { backgroundColor: colors.faint, paddingHorizontal: space.sm, paddingVertical: space.xs, borderRadius: 2 },
+  voteButtons: { flexDirection: 'row', gap: space.sm },
+  voteButton: {
+    flex: 1,
+    minHeight: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: colors.ink,
+    borderRadius: 2,
+    paddingHorizontal: space.xs,
+  },
+  voteButtonOn: { backgroundColor: colors.ink },
+  voteButtonPressed: { opacity: 0.8 },
+  voteButtonFaded: { opacity: 0.35 },
+  voteButtonLabel: { fontFamily: type.body.fontFamily, fontSize: 16, fontWeight: '600', color: colors.ink, textAlign: 'center' },
+  voteButtonLabelOn: { color: colors.paper },
+  take: { gap: space.sm, paddingBottom: space.lg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.rule },
+  takeVoice: { borderLeftWidth: 3, borderLeftColor: colors.rule, paddingLeft: space.md },
+  takeVoiceText: { fontFamily: fonts.serif, fontSize: 18, lineHeight: 27, color: colors.ink, fontStyle: 'italic' },
+  check: { gap: 2, paddingTop: space.xs },
+  verdict: { color: colors.ink },
+  verdict_holds_up: { color: '#2F6B3B' },
+  verdict_partly: { color: '#7A5B12' },
+  verdict_not_backed: { color: '#8A3A1F' },
+  verdict_false: { color: '#8A1F1F' },
+  verdict_unknown: { color: colors.muted },
   error: { color: colors.ink, fontWeight: '600' },
   bullet: { flexDirection: 'row', gap: space.sm },
   bulletMark: { ...type.body, color: colors.muted },

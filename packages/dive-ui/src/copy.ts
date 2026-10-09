@@ -1,5 +1,4 @@
-import type { FinalCrowd, StepCrowd } from '@sia/dive-engine';
-import { DiveApiError } from '@sia/dive-engine';
+import { DiveApiError, VOTE_LABEL, VOTE_ORDER, voteKeyOf, type FinalCrowd, type VoteKey } from '@sia/dive-engine';
 
 /**
  * Interface copy specific to these screens. Like @sia/dive-engine's copy
@@ -7,22 +6,11 @@ import { DiveApiError } from '@sia/dive-engine';
  */
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
-const points = (n: number) => (n === 1 ? '1 point' : `${n} points`);
 
 /**
  * Crowd sentences call the crowd "readers" only when every row in it is a real
  * reader. While seeded estimates are part of it, they say "the crowd".
  */
-
-/** "41% of readers moved here. On average, they moved 6 points toward “<right label>”." */
-export function stepCrowdSummary(crowd: StepCrowd, leftLabel: string, rightLabel: string): string | null {
-  if (crowd.moved_share === null) return null;
-  const seeded = crowd.seeded_share > 0;
-  const moved = `${pct(crowd.moved_share)} of ${seeded ? 'this crowd' : 'readers'} moved here.`;
-  const d = Math.round(crowd.mean_delta ?? 0);
-  if (d === 0) return `${moved} On average, the crowd held steady.`;
-  return `${moved} On average, ${seeded ? 'it' : 'they'} moved ${points(Math.abs(d))} toward “${d < 0 ? leftLabel : rightLabel}”.`;
-}
 
 /** "On average, everyone went from 62 to 55." The average includes the reader's own answers. */
 export function finalCrowdSummary(crowd: FinalCrowd): string | null {
@@ -34,25 +22,51 @@ export function finalCrowdSummary(crowd: FinalCrowd): string | null {
   return `On average, ${who} went from ${from} to ${to}.`;
 }
 
-export function crowdStepDeltaText(meanAbsDelta: number | null, seededShare: number): string | null {
-  if (meanAbsDelta === null) return null;
-  return `${seededShare > 0 ? 'The crowd' : 'Readers'} moved ${points(Math.round(meanAbsDelta))} on average here.`;
-}
-
-/** The text alternative for the final chart: the reader's path, then the crowd's. */
-export function journeyLabel(path: number[], crowd: FinalCrowd): string {
-  const yours = `Your answers, from first to last: ${path.join(', ')}.`;
+/** The text alternative for the final chart: the reader's Before and After, then the crowd's. */
+export function journeyLabel(before: number, after: number, crowd: FinalCrowd): string {
+  const yours = `Your answer went from ${before} to ${after}.`;
   const summary = finalCrowdSummary(crowd);
   return summary ? `${yours} ${summary}` : yours;
+}
+
+/** The fact where the reader's vote had the least company in the crowd. */
+export interface StandApart {
+  stepId: string;
+  yours: VoteKey;
+  /** Share of the crowd that voted the same way as the reader. */
+  share: number;
+  /** The crowd's most common vote on that fact. */
+  top: VoteKey;
+  topShare: number;
+}
+
+/** Ties go to the earlier fact. Null when the crowd has no votes yet. */
+export function standApart(answers: { step_id: string; value: number }[], crowd: FinalCrowd): StandApart | null {
+  let best: StandApart | null = null;
+  for (const stat of crowd.steps) {
+    if (!stat.votes) continue;
+    const answer = answers.find((a) => a.step_id === stat.step_id);
+    const yours = answer ? voteKeyOf(answer.value) : null;
+    if (!yours) continue;
+    const share = stat.votes[yours];
+    if (best && share >= best.share) continue;
+    const top = VOTE_ORDER.reduce((a, b) => (stat.votes![b] > stat.votes![a] ? b : a));
+    best = { stepId: stat.step_id, yours, share, top, topShare: stat.votes[top] };
+  }
+  return best;
+}
+
+/** "You said agree. 71% of readers said disagree." */
+export function standApartText(s: StandApart, seeded: boolean): string {
+  const who = seeded ? 'the crowd' : 'readers';
+  const yours = `You said ${VOTE_LABEL[s.yours].toLowerCase()}.`;
+  if (s.top === s.yours) return `${yours} So did ${pct(s.share)} of ${who}.`;
+  return `${yours} ${pct(s.topShare)} of ${who} said ${VOTE_LABEL[s.top].toLowerCase()}.`;
 }
 
 export function completionsText(n: number): string {
   if (n === 0) return 'no one has finished it yet';
   return n === 1 ? '1 person finished it' : `${n.toLocaleString('en-US')} people finished it`;
-}
-
-export function yourStepDeltaText(previous: number, value: number): string {
-  return `You moved from ${previous} to ${value} here.`;
 }
 
 /** What the reader was doing when a call failed, so the message can say what to do next. */

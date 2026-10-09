@@ -31,6 +31,7 @@ import {
   ShareScreen,
   StartingFactsScreen,
   StepScreen,
+  TakesScreen,
   type PollEvents,
   type RevealFailure,
 } from './screens';
@@ -347,6 +348,8 @@ function DivePlayer({
     const slot = currentSlot(state);
     if (slot === null || sessionId === null || state.pending || isCommitted(state, slot) || inFlight.current) return;
     const value = state.draft ?? pollDefault(state, slot);
+    // A fact vote has no default: nothing is sent until the reader picks one.
+    if (value === null) return;
     inFlight.current = true;
     setJustCommitted(false);
     dispatch({ type: 'commit_start' });
@@ -441,6 +444,9 @@ function DivePlayer({
       );
       break;
     }
+    case 'takes':
+      body = <TakesScreen doc={doc} openUrl={openUrl} onNext={() => go({ type: 'next' })} />;
+      break;
     case 'final':
       body = (
         <FinalScreen

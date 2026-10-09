@@ -50,17 +50,17 @@ export const CHECK_VERDICT_LABEL = {
 } as const;
 
 export const CONFIDENCE_LABEL: Record<Confidence, string> = {
-  established: 'Established',
+  established: 'Confirmed',
   reported: 'Reported',
   disputed: 'Disputed',
-  alleged: 'Alleged',
+  alleged: 'Claimed, not proven',
 };
 
 export const CONFIDENCE_HINT: Record<Confidence, string> = {
-  established: 'Confirmed by court records, official statements or primary documents.',
-  reported: 'Reported by news outlets; not independently confirmed in primary records.',
-  disputed: 'The sides disagree about this.',
-  alleged: 'A claim made by one party that has not been proven.',
+  established: 'Backed by court papers, official statements or the documents themselves.',
+  reported: 'Reported by news outlets, but not yet in official records.',
+  disputed: 'The two sides tell this part differently.',
+  alleged: 'One side says this. It has not been proven.',
 };
 
 const wordCount = (s: string | undefined) => (s ? s.trim().split(/\s+/).filter(Boolean).length : 0);

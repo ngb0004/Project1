@@ -24,8 +24,8 @@ import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium, type Browser, type Locator, type Page } from 'playwright';
-import { caseUrl, mirrorText, slotsOf } from '@sia/dive-engine';
-import { steelmanId, testIds, versionRowId } from '@sia/dive-ui/testIds';
+import { VOTE_ORDER, VOTE_VALUE, caseUrl, mirrorText, slotsOf, yourVoteText } from '@sia/dive-engine';
+import { steelmanId, testIds, versionRowId, voteOptionId } from '@sia/dive-ui/testIds';
 import { ANON_KEY, API_URL, loadFixtures, publishFixtures, serviceClient, type PublishedFixture } from './seed.mjs';
 import { serveStatic } from './serve.mjs';
 
@@ -35,7 +35,7 @@ const PHONE = { width: 390, height: 844 };
 const TIMEOUT = 15_000;
 
 /** Generic reveal copy that must never be on screen before a commit. */
-const CROWD_TEXT = /Everyone who reached this fact|(readers|crowd) moved|held steady|moved everyone most/;
+const CROWD_TEXT = /What everyone else said|You (agreed|disagreed|weren't sure)|split on most|stood apart/;
 
 // ---------------------------------------------------------------------------
 // Build
@@ -262,13 +262,13 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
     answers.push({ step_id: 'before', value: before });
     await id(testIds.next).click();
 
-    let previous = before;
     for (const [i, step] of doc.steps.entries()) {
       const where = `step ${i + 1} (${step.id})`;
       await visible(id(testIds.stepScreen));
       await visible(page.getByText(step.headline, { exact: true }));
       await visible(page.getByText(`Fact ${i + 1} of ${doc.steps.length}`, { exact: true }));
-      assert.equal(await sliderValue(page), previous, `${where}: slider not pre-filled with the last answer`);
+      assert.equal(await id(testIds.slider).count(), 0, `${where}: a fact gets a vote, not the slider`);
+      assert.equal(await id(testIds.pollCommit).getAttribute('aria-disabled'), 'true', `${where}: Lock in before a pick`);
 
       if (i === 0) {
         // Back to Before: still locked at the committed value.
@@ -290,10 +290,10 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
       await assertNoCrowd(page, where);
       if (i === 0) await capture('02-step-before-commit');
 
-      if (i === 0) await tap(page, 0.25);
-      if (i % 2 === 0) await drag(page, i % 4 === 0 ? 0.62 : 0.4);
-      else await keys(page, 'ArrowLeft', 6);
-      const value = await sliderValue(page);
+      const vote = VOTE_ORDER[i % 3]!;
+      const value = VOTE_VALUE[vote];
+      await id(voteOptionId(vote)).click();
+      assert.equal(await id(voteOptionId(vote)).getAttribute('aria-checked'), 'true');
       await assertNoCrowd(page, where);
       assert.ok(
         !rpc.some((c) => c.slot === step.id),
@@ -304,7 +304,11 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
         page.waitForResponse(isRpc('submit_response')),
         id(testIds.pollCommit).click(),
       ]);
-      const reveal = (await submitted.json()) as { step_id: string; value: number; crowd: { n_seed: number } };
+      const reveal = (await submitted.json()) as {
+        step_id: string;
+        value: number;
+        crowd: { n_seed: number; votes: { agree: number; unsure: number; disagree: number } | null };
+      };
       assert.equal(reveal.step_id, step.id);
       assert.equal(reveal.value, value);
       assert.ok(reveal.crowd.n_seed > 0, `${where}: the crowd has no seeded rows`);
@@ -313,16 +317,15 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
       await visible(shown);
       await visible(shown.getByTestId(testIds.crowdChart));
       await visible(shown.getByTestId(testIds.seededNote));
-      assert.equal(await shown.getByTestId(testIds.mirror).innerText(), mirrorText(previous, value));
+      assert.equal(await shown.getByTestId(testIds.mirror).innerText(), yourVoteText(value, reveal.crowd.votes));
       assert.equal(
         await page.evaluate(() => document.activeElement?.textContent ?? ''),
-        mirrorText(previous, value),
+        yourVoteText(value, reveal.crowd.votes),
         `${where}: focus did not move to the reveal`,
       );
       if (i === 0) await capture('03-step-after-commit', 1200);
 
       answers.push({ step_id: step.id, value });
-      previous = value;
 
       if (i === 0 && doc.steps.length > 1) {
         // Reload mid-dive: the page asks first, then the dive resumes at the next
@@ -344,10 +347,20 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
       await id(testIds.next).click();
     }
 
-    // After.
+    // How the story is told online.
+    if (doc.takes.length > 0) {
+      await visible(id(testIds.takesScreen));
+      for (const t of doc.takes) await visible(page.getByText(t.summary, { exact: true }));
+      await assertNoCrowd(page, 'takes');
+      await id(testIds.next).click();
+    }
+
+    // After: starts at the Before answer (the fact votes do not move it); set it with the mouse.
     await visible(id(testIds.afterScreen));
-    assert.equal(await sliderValue(page), previous);
+    assert.equal(await sliderValue(page), before);
     await assertNoCrowd(page, 'after');
+    await tap(page, 0.25);
+    await drag(page, 0.62);
     await keys(page, 'ArrowLeft', 5);
     const after = await sliderValue(page);
     await id(testIds.pollCommit).click();
@@ -362,7 +375,7 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
     await visible(final.getByTestId(testIds.seededNote));
     assert.equal(await final.getByTestId(testIds.mirror).innerText(), mirrorText(before, after));
     const headlines = doc.steps.map((s) => s.headline);
-    for (const top of [testIds.topStepYou, testIds.topStepCrowd]) {
+    for (const top of [testIds.mostSplit, testIds.standApart]) {
       const text = await id(top).innerText();
       assert.ok(
         headlines.some((h) => text.includes(h)),

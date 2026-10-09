@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fireEvent, render, screen, within } from '@testing-library/react-native';
 import { assertValidCase, type Case, type PublicCase } from '@sia/case-schema';
 import type { DiveApi } from '@sia/dive-engine';
-import { DiveFlow, depthLayerId, steelmanId, testIds } from '@sia/dive-ui';
+import { DiveFlow, depthLayerId, steelmanId, takeId, testIds, voteOptionId } from '@sia/dive-ui';
 
 /** The full case documents in /cases/fixtures (with admin-only fields). */
 export function loadFixtures(): Case[] {
@@ -60,7 +60,7 @@ export async function playThrough(api: DiveApi, doc: PublicCase, deviceId = 'dev
   for (const [i, step] of doc.steps.entries()) {
     await screen.findByText(step.headline);
     expect(screen.getByText(step.body)).toBeOnTheScreen();
-    expect(screen.getByText(step.micro_poll.prompt)).toBeOnTheScreen();
+    expect(screen.getByText(step.micro_poll.statement)).toBeOnTheScreen();
     expect(screen.getByTestId(testIds.flagLink)).toBeOnTheScreen();
     expect(screen.queryByTestId(testIds.reveal)).toBeNull();
     expect(screen.queryByTestId(testIds.crowdChart)).toBeNull();
@@ -70,11 +70,23 @@ export async function playThrough(api: DiveApi, doc: PublicCase, deviceId = 'dev
     } else {
       expect(screen.queryByTestId(testIds.goDeeper)).toBeNull();
     }
-    await nudge(i % 2 ? 'decrement' : 'increment');
+    // Nothing is picked yet, so there is nothing to lock in.
+    expect(screen.getByTestId(testIds.pollCommit)).toBeDisabled();
+    await press(voteOptionId(['agree', 'unsure', 'disagree'][i % 3]!));
     await press(testIds.pollCommit);
     const reveal = await screen.findByTestId(testIds.reveal);
     expect(within(reveal).getByTestId(testIds.mirror)).toBeOnTheScreen();
     reveals.push(reveal);
+    await press(testIds.next);
+  }
+
+  if (doc.takes.length > 0) {
+    await screen.findByTestId(testIds.takesScreen);
+    for (const t of doc.takes) {
+      const take = screen.getByTestId(takeId(t.id));
+      expect(within(take).getByText(t.summary)).toBeOnTheScreen();
+      for (const c of t.checks) expect(within(take).getByText(c.claim)).toBeOnTheScreen();
+    }
     await press(testIds.next);
   }
 

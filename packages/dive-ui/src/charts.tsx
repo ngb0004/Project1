@@ -1,6 +1,6 @@
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Line, Polyline, Rect } from 'react-native-svg';
-import type { Histogram, ShiftBuckets } from '@sia/dive-engine';
+import { VOTE_LABEL, VOTE_ORDER, voteSplitText, type Histogram, type VoteKey, type VoteSplit } from '@sia/dive-engine';
 import { useEntrance } from './motion';
 import { testIds } from './testIds';
 import { colors, space, type } from './theme';
@@ -10,86 +10,39 @@ import { colors, space, type } from './theme';
  * that use the accent color and motion.
  */
 
-export type ShiftBucket = keyof ShiftBuckets;
-
-const BUCKETS: ShiftBucket[] = ['left_big', 'left', 'none', 'right', 'right_big'];
-const BUCKET_LABEL: Record<ShiftBucket, string> = {
-  left_big: '15+',
-  left: '1–14',
-  none: 'No change',
-  right: '1–14',
-  right_big: '15+',
-};
-
-/** Which shift bucket a move from `previous` to `value` falls in (same bands as the database). */
-export function bucketOf(previous: number, value: number): ShiftBucket {
-  const d = value - previous;
-  if (d <= -15) return 'left_big';
-  if (d < 0) return 'left';
-  if (d === 0) return 'none';
-  if (d < 15) return 'right';
-  return 'right_big';
-}
-
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
-const BAR_MAX = 76;
-
-/** How everyone who reached a step moved there, in five bands, with the reader's own band marked. */
-export function ShiftChart({
-  shift,
-  you,
-  leftLabel,
-  rightLabel,
-}: {
-  shift: ShiftBuckets;
-  you: ShiftBucket;
-  leftLabel: string;
-  rightLabel: string;
-}) {
+/** How everyone who reached a fact voted on it, one row per answer, with the reader's own answer marked. */
+export function VoteSplitBars({ votes, you }: { votes: VoteSplit; you: VoteKey | null }) {
   const progress = useEntrance({ delay: 180, nativeDriver: false });
-  const max = Math.max(...BUCKETS.map((b) => shift[b]), 0.0001);
-  const describe = (b: ShiftBucket) =>
-    b === 'none'
-      ? `${pct(shift.none)} did not move`
-      : `${pct(shift[b])} moved ${b.endsWith('big') ? '15 or more' : '1 to 14'} points toward ${b.startsWith('left') ? leftLabel : rightLabel}`;
-
   return (
     <View
       testID={testIds.crowdChart}
       accessible
-      accessibilityLabel={`How the crowd moved at this step: ${BUCKETS.map(describe).join('; ')}.`}
+      accessibilityLabel={`How everyone voted: ${voteSplitText(votes)}.${you ? ` You said ${VOTE_LABEL[you].toLowerCase()}.` : ''}`}
+      style={styles.voteRows}
     >
-      <View style={styles.columns}>
-        {BUCKETS.map((b) => {
-          const mine = b === you;
-          const height = Math.max(2, (shift[b] / max) * BAR_MAX);
-          return (
-            <View key={b} style={styles.column}>
-              <View style={styles.barSlot}>
-                <Text style={[type.small, styles.columnPct, mine && styles.mine]}>{pct(shift[b])}</Text>
-                <Animated.View
-                  style={[
-                    styles.bar,
-                    { backgroundColor: mine ? colors.accent : colors.accentSoft },
-                    { height: progress.interpolate({ inputRange: [0, 1], outputRange: [0, height] }) },
-                  ]}
-                />
-              </View>
-              <Text style={[type.small, styles.columnLabel, mine && styles.mine]}>{BUCKET_LABEL[b]}</Text>
-              {mine ? (
-                <Text style={[type.caps, styles.youMark]}>You</Text>
-              ) : (
-                <Text style={[type.caps, styles.youSpacer]}> </Text>
-              )}
+      {VOTE_ORDER.map((k) => {
+        const mine = k === you;
+        return (
+          <View key={k} style={styles.voteRow}>
+            <Text style={[type.body, styles.voteLabel, mine && styles.mine]}>
+              {VOTE_LABEL[k]}
+              {mine ? <Text style={[type.caps, styles.youMark]}>  You</Text> : null}
+            </Text>
+            <View style={styles.voteTrack}>
+              <Animated.View
+                style={[
+                  styles.voteBar,
+                  { backgroundColor: mine ? colors.accent : colors.accentSoft },
+                  { width: progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', `${Math.max(1, votes[k] * 100)}%`] }) },
+                ]}
+              />
             </View>
-          );
-        })}
-      </View>
-      <View style={styles.axis}>
-        <Text style={[type.small, styles.axisLeft]}>← {leftLabel}</Text>
-        <Text style={[type.small, styles.axisRight]}>{rightLabel} →</Text>
-      </View>
+            <Text style={[type.body, styles.votePct, mine && styles.mine]}>{pct(votes[k])}</Text>
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -149,7 +102,7 @@ export function JourneyChart({
   rightLabel,
   accessibilityLabel,
 }: {
-  /** The reader's answers in order: before, each step, after. */
+  /** The reader's main answers in order: Before, then After. */
   path: number[];
   beforeHistogram: Histogram | null;
   afterHistogram: Histogram | null;
@@ -256,15 +209,14 @@ export function JourneyChart({
 }
 
 const styles = StyleSheet.create({
-  columns: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm },
-  column: { flex: 1, alignItems: 'center', gap: space.xs },
-  columnPct: { color: colors.ink, fontVariant: ['tabular-nums'], textAlign: 'center', marginBottom: 2 },
-  barSlot: { height: BAR_MAX + 22, width: '100%', justifyContent: 'flex-end' },
-  bar: { width: '100%', borderTopLeftRadius: 2, borderTopRightRadius: 2 },
-  columnLabel: { textAlign: 'center', fontSize: 12 },
+  voteRows: { gap: space.sm },
+  voteRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  voteLabel: { width: 112 },
+  voteTrack: { flex: 1, height: 14, backgroundColor: colors.faint, borderRadius: 2, overflow: 'hidden' },
+  voteBar: { height: '100%', borderRadius: 2 },
+  votePct: { width: 48, textAlign: 'right', fontVariant: ['tabular-nums'] },
   mine: { color: colors.accent, fontWeight: '600' },
   youMark: { color: colors.accent },
-  youSpacer: { opacity: 0 },
   axis: { flexDirection: 'row', justifyContent: 'space-between', gap: space.md, marginTop: space.sm },
   axisLeft: { flexShrink: 1 },
   axisRight: { flexShrink: 1, textAlign: 'right' },

@@ -14,7 +14,7 @@ const fixtures = loadFixtures();
 const seedProfile = (stepIds: string[]) => ({
   sessions: 120,
   before_bins: [1, 1, 2, 3, 5, 6, 7, 5, 3, 2],
-  steps: Object.fromEntries(stepIds.map((id, i) => [id, { move_share: 0.5, mean_shift: i % 2 ? -10 : 8, spread: 5 }])),
+  steps: Object.fromEntries(stepIds.map((id, i) => [id, i % 2 ? { agree: 1, unsure: 1, disagree: 3 } : { agree: 3, unsure: 1, disagree: 1 }])),
 });
 
 const serve = (entries: unknown) => {

@@ -144,7 +144,7 @@ Environment:
 | `PIPELINE_HEARTBEAT_SECONDS` | 60 | lease renewal while a job runs |
 | `PIPELINE_SHUTDOWN_GRACE_SECONDS` | 10 | how long a job in progress may finish after SIGTERM before it is released |
 | `PIPELINE_BUDGET_USD` | 40 | spend cap per job (`--budget-usd`) |
-| `PIPELINE_MAX_ROUNDS` | 3 | critic-loop rounds per job (`--max-rounds`) |
+| `PIPELINE_MAX_ROUNDS` | 3 | critic-loop rounds per job, 1 to 3 (`--max-rounds`) |
 | `PIPELINE_MODEL_STRONG`, `PIPELINE_MODEL_FAST` | see above | models |
 | `PIPELINE_HEALTH_FILE` | unset (`/tmp/pipeline-worker.alive` in the image) | touched on every poll and heartbeat, for a health check |
 

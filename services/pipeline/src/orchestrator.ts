@@ -124,6 +124,8 @@ export interface PipelineDeps {
   archive?: ArchivedSnapshot[];
   signal?: AbortSignal;
   onProgress?: (message: string) => void;
+  /** Called with the run's total spend whenever it grows (the worker records it with each heartbeat). */
+  onSpend?: (totalUsd: number) => void;
 }
 
 export interface OpenedSourceSummary {
@@ -403,6 +405,12 @@ class PipelineRun {
     this.deps.onProgress?.(message);
   }
 
+  private addCost(usd: number) {
+    if (!(usd > 0)) return;
+    this.cost += usd;
+    this.deps.onSpend?.(this.cost);
+  }
+
   private async note(text: string, round: number, scope: string | null = null) {
     await this.store.log.append({ agent: PIPELINE_LOG_AGENT, scope, round, kind: 'note', excerpt: text });
   }
@@ -459,7 +467,7 @@ class PipelineRun {
         });
       } catch (e) {
         const err = e as Error;
-        this.cost += e instanceof AgentRunError ? e.costUsd : 0;
+        this.addCost(e instanceof AgentRunError ? e.costUsd : 0);
         await tools.note(`Agent call failed: ${label}, attempt ${attempt}: ${err.message}`).catch(() => {});
         this.progress(`${label}: failed (${err.message})`);
         if (e instanceof AgentRunError && e.reason === 'unavailable') {
@@ -469,7 +477,7 @@ class PipelineRun {
         if (attempt >= 2 || !retryable || this.deps.signal?.aborted) throw e;
         continue;
       }
-      this.cost += r.costUsd;
+      this.addCost(r.costUsd);
       const summary = clip(opts.summarize(r.output), 4000);
       this.reports.push({
         agent: spec.name,

@@ -157,6 +157,8 @@ export interface PipelineJobRow {
   instructions: string | null;
   status: PipelineJobStatus;
   attempts: number;
+  /** Model spend in USD across all attempts, as the worker last reported it (absent before migration 10). */
+  spent_usd?: number | string | null;
   claimed_by: string | null;
   claimed_at: string | null;
   heartbeat_at: string | null;

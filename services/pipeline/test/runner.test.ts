@@ -4,7 +4,7 @@ import type { query } from '@anthropic-ai/claude-agent-sdk';
 import { AGENT_SPECS } from '../src/agents';
 import type { AgentContext, AgentSpec } from '../src/agents/types';
 import { ResearchTools } from '../src/research/tools';
-import { ClaudeAgentRunner, DEFAULT_MODELS, outputJsonSchema } from '../src/runner/claude';
+import { ClaudeAgentRunner, DEFAULT_MODELS, estimateCostUsd, outputJsonSchema } from '../src/runner/claude';
 import { FakeRunner } from '../src/runner/fake';
 import { AgentRunError, isServiceUnavailable } from '../src/runner/types';
 import { AGENT_STANDARDS, STANDARD_RULES, UNTRUSTED_DATA_RULE } from '../src/standards';
@@ -185,6 +185,29 @@ describe('ClaudeAgentRunner.run', () => {
     const runner = new ClaudeAgentRunner({ queryFn: fn });
     const err = await runner.run(tinySpec, { q: 'x' }, ctx, toolsFor(tinySpec as AgentSpec<never, unknown>)).catch((e: unknown) => e);
     expect(err).toMatchObject({ name: 'AgentRunError', reason: 'output', costUsd: 0.02 });
+  });
+
+  it('charges a call that ends without its result (timeout, abort, crash) what its responses used, at list price', async () => {
+    const assistant = (id: string, usage: Record<string, number>) => ({ type: 'assistant', message: { id, model: 'claude-opus-5-5', usage, content: [] } });
+    // A call that streams two responses (the first in two blocks) and then hangs until its time limit.
+    const hanging = ((args: { options: { abortController: AbortController } }) =>
+      (async function* () {
+        yield assistant('m1', { input_tokens: 10_000, output_tokens: 50, cache_read_input_tokens: 20_000 });
+        yield assistant('m1', { input_tokens: 10_000, output_tokens: 120, cache_read_input_tokens: 20_000 });
+        yield assistant('m2', { input_tokens: 3_000, output_tokens: 15, cache_creation_input_tokens: 1_000 });
+        await new Promise((_, reject) => args.options.abortController.signal.addEventListener('abort', () => reject(new Error('aborted by timeout'))));
+      })()) as unknown as typeof query;
+    const err = await new ClaudeAgentRunner({ queryFn: hanging, timeoutMs: 50 })
+      .run(tinySpec, { q: 'x' }, ctx, toolsFor(tinySpec as AgentSpec<never, unknown>))
+      .catch((e: unknown) => e);
+    // (10,000 + 3,000) x $4 + (120 + 15) x $20 + 20,000 x $0.20 + 1,000 x $5, per million tokens
+    const expected = (13_000 * 4 + 135 * 20 + 20_000 * 0.2 + 1_000 * 5) / 1e6;
+    expect(err).toMatchObject({ name: 'AgentRunError', reason: 'aborted' });
+    expect((err as AgentRunError).costUsd).toBeCloseTo(expected, 10);
+    expect((err as Error).message).toMatch(/estimated from token usage/);
+    expect(estimateCostUsd('claude-sonnet-5-5', [{ input_tokens: 1e6, output_tokens: 1e6 }])).toBe(12);
+    // An unknown model is priced at the highest known rates, so the estimate errs high.
+    expect(estimateCostUsd('some-new-model', [{ output_tokens: 1e6 }])).toBe(20);
   });
 
   it('rejects a run that ends with no result', async () => {

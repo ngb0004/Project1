@@ -54,7 +54,7 @@ export const WORKER_ENV = {
   PIPELINE_HEARTBEAT_SECONDS: 'lease renewal interval while a job runs (default 60; a lease goes stale after 30 minutes)',
   PIPELINE_SHUTDOWN_GRACE_SECONDS: 'on SIGTERM/SIGINT, time the job in progress gets before it is released (default 10)',
   PIPELINE_BUDGET_USD: `spend cap per job in USD (default ${DEFAULT_RUN_BUDGET_USD}; --budget-usd)`,
-  PIPELINE_MAX_ROUNDS: 'critic-loop rounds per job (default 3; --max-rounds)',
+  PIPELINE_MAX_ROUNDS: 'critic-loop rounds per job, 1 to 3 (default 3; --max-rounds)',
   PIPELINE_MODEL_STRONG: 'model for the scoper, drafter, critics and editor',
   PIPELINE_MODEL_FAST: 'model for the researchers',
   PIPELINE_HEALTH_FILE: 'optional file touched on every poll and heartbeat (for a container health check)',

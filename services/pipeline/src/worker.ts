@@ -37,7 +37,10 @@ export interface WorkerDeps {
    */
   claim?: ClaimJob;
   agents?: PipelineAgents;
-  /** Spend cap per job, in USD. */
+  /**
+   * Spend cap per job, in USD, across all its attempts: an attempt gets what
+   * earlier attempts (the job's recorded spent_usd) left of it.
+   */
   budgetUsd?: number;
   maxRounds?: number;
   asOf?: string;
@@ -285,12 +288,18 @@ async function runClaimedJob(deps: WorkerDeps, job: PipelineJobRow): Promise<Job
   if (deps.signal?.aborted) onStop();
   else deps.signal?.addEventListener('abort', onStop, { once: true });
 
+  // Spend: what earlier attempts of this job recorded, plus what this attempt has spent so far. It is reported
+  // with every heartbeat, on release and on finish, so a job that runs again starts with what is left.
+  const priorSpend = Math.max(0, Number(job.spent_usd ?? 0) || 0);
+  let attemptSpend = 0;
+  const spent = () => round4(priorSpend + attemptSpend);
+
   // The heartbeat renews the lease; once the outcome is being written it stops, since a finished job has no lease.
   let lost = false;
   let finishing = false;
   const beat = async () => {
     deps.onAlive?.();
-    const { data, error } = await db.rpc('pipeline_renew_lease', { p_job_id: job.id, p_worker: workerId });
+    const { data, error } = await db.rpc('pipeline_renew_lease', { p_job_id: job.id, p_worker: workerId, p_spent_usd: spent() });
     if (finishing) return;
     if (error) {
       progress(`heartbeat failed: ${error.message}`);
@@ -317,6 +326,7 @@ async function runClaimedJob(deps: WorkerDeps, job: PipelineJobRow): Promise<Job
       p_status: status,
       p_result: result,
       p_worker: workerId,
+      p_spent_usd: spent(),
       ...(error !== undefined ? { p_error: error.slice(0, 20000) } : {}),
     });
   };
@@ -342,6 +352,18 @@ async function runClaimedJob(deps: WorkerDeps, job: PipelineJobRow): Promise<Job
       }
     }
 
+    // The budget covers every attempt of the job: this attempt gets what the earlier ones left.
+    let budgetUsd = deps.budgetUsd;
+    if (budgetUsd !== undefined && priorSpend > 0) {
+      budgetUsd = budgetUsd - priorSpend;
+      await note(
+        `Earlier attempts of this job spent $${priorSpend.toFixed(2)} of its $${deps.budgetUsd!.toFixed(2)} budget; attempt ${job.attempts} gets $${Math.max(0, budgetUsd).toFixed(2)}.`,
+      );
+      if (budgetUsd < 1) {
+        throw new Error(`the job's budget of $${deps.budgetUsd!.toFixed(2)} was used up by earlier attempts ($${priorSpend.toFixed(2)} spent), so attempt ${job.attempts} did not run`);
+      }
+    }
+
     const result = await runCasePipeline(plan.request, {
       runner: deps.runner,
       store,
@@ -350,9 +372,12 @@ async function runClaimedJob(deps: WorkerDeps, job: PipelineJobRow): Promise<Job
       ...(deps.agents ? { agents: deps.agents } : {}),
       ...(deps.asOf ? { asOf: deps.asOf } : {}),
       ...(deps.maxRounds ? { maxRounds: deps.maxRounds } : {}),
-      ...(deps.budgetUsd ? { budgetUsd: deps.budgetUsd } : {}),
+      ...(budgetUsd ? { budgetUsd } : {}),
       signal: jobAbort.signal,
       onProgress: progress,
+      onSpend: (usd) => {
+        attemptSpend = usd;
+      },
     });
     // From here on the job is completed whatever the stop signal says: submitting takes seconds, and a job whose
     // package is already in the queue must not be released and run again. Only a lost lease stops it.
@@ -364,6 +389,7 @@ async function runClaimedJob(deps: WorkerDeps, job: PipelineJobRow): Promise<Job
         ...(result.baseVersion !== undefined ? { base_version: result.baseVersion } : {}),
         ...(result.since ? { since: result.since } : {}),
         cost_usd: round4(result.costUsd),
+        ...(priorSpend > 0 ? { spent_usd_all_attempts: spent() } : {}),
         sources_opened: result.researchLog.opened.length,
         research_log_rows: result.researchLog.total,
       };
@@ -393,6 +419,7 @@ async function runClaimedJob(deps: WorkerDeps, job: PipelineJobRow): Promise<Job
       editor_fallback: result.editorFallback,
       open_issues: result.review.open_issues.length,
       cost_usd: round4(result.costUsd),
+      ...(priorSpend > 0 ? { spent_usd_all_attempts: spent() } : {}),
       sources_opened: result.researchLog.opened.length,
       research_log_rows: result.researchLog.total,
       ...(result.update ? { update_summary: result.update.summary, developments: result.update.developments.length, since: result.update.since } : {}),
@@ -404,7 +431,8 @@ async function runClaimedJob(deps: WorkerDeps, job: PipelineJobRow): Promise<Job
     clearInterval(heartbeat);
     const err = e as Error & { costUsd?: number };
     const message = `${err.name}: ${err.message}`;
-    const out = { cost_usd: round4(err.costUsd ?? 0), sources_opened: store.opened().length };
+    attemptSpend = Math.max(attemptSpend, err.costUsd ?? 0);
+    const out = { cost_usd: round4(attemptSpend), spent_usd_all_attempts: spent(), sources_opened: store.opened().length };
 
     if (lost || e instanceof JobLostError) {
       await note(`Worker ${workerId} stopped: it no longer holds this job (${message}). Nothing was submitted by this attempt.`).catch(() => {});
@@ -413,7 +441,7 @@ async function runClaimedJob(deps: WorkerDeps, job: PipelineJobRow): Promise<Job
     if (jobAbort.signal.aborted && !finishing) {
       const reason = (jobAbort.signal.reason as Error | undefined)?.message ?? 'the worker is stopping';
       try {
-        const status = await rpc<string>(db, 'pipeline_release_job', { p_job_id: job.id, p_worker: workerId, p_reason: reason });
+        const status = await rpc<string>(db, 'pipeline_release_job', { p_job_id: job.id, p_worker: workerId, p_reason: reason, p_spent_usd: spent() });
         await note(
           status === 'queued'
             ? `Released by worker ${workerId} on attempt ${job.attempts} (${reason}); the job is back in the queue and the next attempt starts over.`

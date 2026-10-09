@@ -219,4 +219,73 @@ describe.skipIf(!reachable)('the worker service against the local Supabase stack
       await sql(`update public.pipeline_jobs set status = 'cancelled' where id = $1`, [jobId]);
     });
   });
+
+  it('records the job\'s spend with its heartbeat, release and finish, and gives a later attempt only what is left of the budget', async () => {
+    const slug = `svc-spend-${randomUUID().slice(0, 8)}`;
+    // The scoper finishes ($0.25); the records researcher blocks until the worker is stopped.
+    let started!: () => void;
+    const isStarted = new Promise<void>((r) => (started = r));
+    const blocker = { isStarted, release: () => {} };
+    const blockingRecords: FakeScript = () => {
+      started();
+      return new Promise(() => {});
+    };
+    await withQueueLock(async () => {
+      const jobId = await adminCreateCase(admin, `Spend test ${slug}`);
+      // Attempt 1 spends $0.25 per call and is stopped mid-run: the release records what it spent.
+      const shutdown = createShutdown(0);
+      const first = runWorkerOnce({
+        db: pipeline,
+        runner: new FakeRunner(cleanScripts({ scoper: scoperScript(slug), records_researcher: blockingRecords }), { costPerCall: 0.25 }),
+        claim: claimJobById(jobId),
+        workerId: WORKER,
+        fetcher: fakeFetcher(),
+        asOf: AS_OF,
+        heartbeatMs: 25,
+        budgetUsd: 10,
+        signal: shutdown.abort,
+      });
+      await blocker.isStarted;
+      shutdown.trigger('SIGTERM');
+      blocker.release();
+      expect(await first).toMatchObject({ jobId, status: 'released' });
+      const afterRelease = await job(jobId);
+      expect(afterRelease).toMatchObject({ status: 'queued', attempts: 1 });
+      // At least the scoper's $0.25 (the side researchers may have finished too).
+      expect(Number(afterRelease.spent_usd)).toBeGreaterThanOrEqual(0.25);
+      // Pretend the earlier attempts spent most of the budget.
+      await sql(`update public.pipeline_jobs set spent_usd = 9.5 where id = $1`, [jobId]);
+
+      // Attempt 2: $9.50 of the $10 budget is gone, so it does not run at all.
+      const second = await runWorkerOnce({
+        db: pipeline,
+        runner: new FakeRunner(cleanScripts({ scoper: scoperScript(slug) }), { costPerCall: 0.25 }),
+        claim: claimJobById(jobId),
+        workerId: WORKER,
+        fetcher: fakeFetcher(),
+        asOf: AS_OF,
+        budgetUsd: 10,
+      });
+      expect(second).toMatchObject({ jobId, status: 'failed', error: expect.stringMatching(/budget of \$10\.00 was used up by earlier attempts \(\$9\.50 spent\)/) });
+      expect(Number((await job(jobId)).spent_usd)).toBe(9.5);
+    });
+  });
+
+  it('a finished job records what all its attempts spent', async () => {
+    const slug = `svc-spend-ok-${randomUUID().slice(0, 8)}`;
+    await withQueueLock(async () => {
+      const jobId = await adminCreateCase(admin, `Spend finish test ${slug}`);
+      await sql(`update public.pipeline_jobs set spent_usd = 1.5 where id = $1`, [jobId]);
+      const runner = new FakeRunner(cleanScripts({ scoper: scoperScript(slug) }), { costPerCall: 0.1 });
+      const out = await runWorkerOnce({ db: pipeline, runner, claim: claimJobById(jobId), workerId: WORKER, fetcher: fakeFetcher(), asOf: AS_OF, budgetUsd: 40 });
+      expect(out).toMatchObject({ jobId, status: 'succeeded' });
+      const calls = runner.calls.length;
+      const row = await job(jobId);
+      expect(Number(row.spent_usd)).toBeCloseTo(1.5 + calls * 0.1, 4);
+      expect(row.result).toMatchObject({ spent_usd_all_attempts: expect.closeTo(1.5 + calls * 0.1, 4) });
+      // The research log says how much of the budget this attempt got.
+      const log = await listResearchLog(admin, jobId);
+      expect(log.some((r) => r.kind === 'note' && r.excerpt?.includes('Earlier attempts of this job spent $1.50 of its $40.00 budget; attempt 1 gets $38.50.'))).toBe(true);
+    });
+  });
 });

@@ -15,21 +15,30 @@ import {
   type OpenIssue,
   type ReviewRecord,
 } from '@sia/case-schema';
-import drafterSpec, { type DrafterInput, type DrafterOutput } from './agents/drafter';
+import drafterSpec, { type DrafterInput, type DrafterOutput, type ResearchGapRef, type Resolution, type ResolutionAction } from './agents/drafter';
 import editorSpec, { type EditorInput, type EditorOutput } from './agents/editor';
-import factCheckerSpec, { type FactCheckItem, type FactCheckerInput, type FactCheckerOutput } from './agents/factChecker';
+import factCheckerSpec, { factCheckTargets, type FactCheckItem, type FactCheckerInput, type FactCheckerOutput } from './agents/factChecker';
 import hardQuestionsSpec, { type HardQuestionItem, type HardQuestionsInput, type HardQuestionsOutput } from './agents/hardQuestions';
 import recordsResearcherSpec from './agents/recordsResearcher';
 import redTeamSpec, { type RedTeamFlag, type RedTeamInput, type RedTeamOutput } from './agents/redTeam';
 import researcherSpec, { type ResearchClaim, type ResearchOutput, type ResearcherInput } from './agents/researcher';
-import scoperSpec, { MAX_MUST_ANSWER, developmentItem, outlineFromCase, updateDevelopmentsItem, type Outline, type OutlineSide, type ScoperInput } from './agents/scoper';
-import type { Critiques, DraftCase, Gap, GapInput, OpenedSourceRef, SourceSnapshotRef } from './agents/shared';
+import scoperSpec, {
+  MAX_MUST_ANSWER,
+  developmentItem,
+  outlineFromCase,
+  statusItem,
+  updateDevelopmentsItem,
+  type Outline,
+  type OutlineSide,
+  type ScoperInput,
+} from './agents/scoper';
+import { judgingWordReport, type Critiques, type DraftCase, type Gap, type GapInput, type OpenedSourceRef, type SourceSnapshotRef } from './agents/shared';
 import { bestSnapshot, describeDrift, quotesBySource, sourceDrift, type ArchivedSnapshot } from './archive';
 import type { AgentContext, AgentSpec } from './agents/types';
 import { checkCitations, failureKey, type CitationFailure } from './factcheck';
 import type { LogSummary } from './research/log';
 import type { SourceStore } from './research/store';
-import { matchQuote, urlKey } from './research/text';
+import { MIN_QUOTE_CHARS, matchQuote, normalizeForMatch, urlKey } from './research/text';
 import { ResearchTools } from './research/tools';
 import { AgentRunError, type AgentRunResult, type AgentRunner } from './runner/types';
 import {
@@ -215,6 +224,38 @@ export async function runCasePipeline(request: PipelineRequest, deps: PipelineDe
 
 const FAILING_VERDICTS = new Set<FactCheckRow['verdict']>(['unsupported', 'uncited', 'source_unavailable']);
 
+/** Note prefix of the failing rows the orchestrator adds for item-and-source pairs the fact-checker did not check. */
+export const NOT_CHECKED = 'Not checked:';
+/** Note prefix of rows from the fact-check of the editor's changes. */
+export const FINAL_CHECK = 'Final check after the editor:';
+
+const isNotChecked = (row: Pick<FactCheckItem, 'note'>) => !!row.note?.startsWith(NOT_CHECKED);
+const pairKey = (target: string, sourceId: string | undefined) => `${target}\u0000${sourceId ?? ''}`;
+
+const STOP_WORDS = new Set(
+  'that this with from have were said says will would there their they them about after before into than then when which while also been being does what because according over under more most such only some other these those where whose could should said told'.split(
+    ' ',
+  ),
+);
+
+/** Content words of a text (numbers, and words of four or more letters that are not stop words), cut to five-letter stems. */
+function contentStems(text: string): string[] {
+  const words = normalizeForMatch(text).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return [...new Set(words.filter((w) => /\d/.test(w) || (w.length >= 4 && !STOP_WORDS.has(w))).map((w) => w.slice(0, 5)))];
+}
+
+/**
+ * Whether a fact-check row's claim is about the item's own text (a step's
+ * headline and body, a fact's text), rather than a detail only an extra
+ * citation or a layer supports. Short claims count as about the item.
+ */
+export function claimConcernsText(claim: string, itemText: string): boolean {
+  const claimWords = contentStems(claim);
+  if (claimWords.length < 3) return true;
+  const item = new Set(contentStems(itemText));
+  return claimWords.filter((w) => item.has(w)).length / claimWords.length >= 0.4;
+}
+
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
 const todayUtc = () => new Date().toISOString().slice(0, 10);
@@ -255,16 +296,23 @@ function stepIdOf(target: string, c: Pick<Case, 'steps'>): string | undefined {
   return id && c.steps.some((s) => s.id === id) ? id : undefined;
 }
 
+interface ResolutionRecord {
+  action: ResolutionAction;
+  text: string;
+}
+
 interface QuestionRecord {
   item: HardQuestionItem;
   firstRound: number;
   lastRound: number;
-  drafterResolution?: string;
+  drafterResolution?: ResolutionRecord;
 }
 
 interface FlagRecord {
   flag: RedTeamFlag;
-  drafterResolution?: string;
+  drafterResolution?: ResolutionRecord;
+  /** The next round's red team (shown this flag) raised it again. */
+  reraised?: boolean;
 }
 
 interface RoundCritique {
@@ -275,7 +323,26 @@ interface RoundCritique {
   citations: CitationFailure[];
   validationErrors: string[];
   failedCritics: string[];
+  /** Downgrades not applied: the row's claim is not in the item's headline and body (see applyDowngrades). */
+  skippedDowngrades: FactCheckItem[];
 }
+
+/** What the fact-check of the editor's changes found (see finalCheck). */
+interface FinalCheck {
+  /** Items the editor changed after the last critic round. */
+  edited: string[];
+  /** True when the fact-checker re-checked them. */
+  ran: boolean;
+  /** Edited items the final check found supported. */
+  passed: Set<string>;
+  /** Edited items put back as the last checked draft had them (or removed when new), with why. */
+  reverted: Map<string, string>;
+  rows: FactCheckItem[];
+  skippedDowngrades: FactCheckItem[];
+}
+
+/** An open issue while the review is assembled: the fact-check target it came from, if any. */
+type DraftIssue = Omit<OpenIssue, 'id'> & { target?: string };
 
 interface Blocking {
   questions: HardQuestionItem[];
@@ -302,7 +369,7 @@ class PipelineRun {
   private cost = 0;
   private readonly reports: AgentReport[] = [];
   private claims: ResearchClaim[] = [];
-  private readonly issues: Omit<OpenIssue, 'id'>[] = [];
+  private readonly issues: DraftIssue[] = [];
   private outline!: Outline;
   private base: Case | undefined;
   /** Live updates: the live version, the screened research, and the drafter's resolutions by ref. */
@@ -311,11 +378,19 @@ class PipelineRun {
   private readonly resolutions = new Map<string, string>();
   /** Researcher calls that failed, as "scope: message". */
   private readonly researchFailures: string[] = [];
+  /** What each researcher (by scope) last reported it could not find or verify. */
+  private readonly researchGaps = new Map<string, Gap[]>();
+  /** The last draft's research_gaps: facts the drafter needed and no claim supplied. */
+  private drafterGaps: string[] = [];
+  /** The editor's resolutions by ref (flag ids, question ids, fact_check:<target>). */
+  private readonly editorResolutions = new Map<string, ResolutionRecord>();
 
   constructor(private readonly deps: PipelineDeps) {
     this.agents = deps.agents ?? DEFAULT_AGENTS;
     this.asOf = deps.asOf ?? todayUtc();
-    this.maxRounds = Math.max(1, deps.maxRounds ?? MAX_ROUNDS);
+    // The spec's loop stops at 3 rounds: a larger or non-numeric setting falls back to that.
+    const rounds = deps.maxRounds;
+    this.maxRounds = rounds !== undefined && Number.isFinite(rounds) ? Math.min(MAX_ROUNDS, Math.max(1, Math.floor(rounds))) : MAX_ROUNDS;
     this.budget = deps.budgetUsd ?? Infinity;
   }
 
@@ -336,11 +411,12 @@ class PipelineRun {
   // -------------------------------------------------------------------------
 
   /**
-   * Kept back for the editor, so a loop that runs long still ends with the
-   * house-style pass: 10% of the run budget, at most $4.
+   * Kept back for the editor and the fact-check of its changes, so a loop that
+   * runs long still ends with the house-style pass and nothing unchecked:
+   * 15% of the run budget, at most $6.
    */
   private get reserveUsd(): number {
-    return Number.isFinite(this.budget) ? Math.min(this.budget * 0.1, 4) : 0;
+    return Number.isFinite(this.budget) ? Math.min(this.budget * 0.15, 6) : 0;
   }
 
   /** What is left to spend, minus the editor's reserve unless `useReserve`. */
@@ -465,11 +541,12 @@ class PipelineRun {
         });
         if (salvaged.length) {
           await this.note(`Kept ${salvaged.length} claim(s) that the failed ${scope} researcher logged before it stopped.`, round, scope);
-          fresh.push(...(await this.acceptClaims(salvaged, scope, round)));
+          fresh.push(...(await this.acceptClaims(salvaged, scope, round, toolsOf.get(i))));
         }
         continue;
       }
-      fresh.push(...(await this.acceptClaims(r.value.out.claims, scope, round)));
+      this.researchGaps.set(scope, r.value.out.gaps);
+      fresh.push(...(await this.acceptClaims(r.value.out.claims, scope, round, toolsOf.get(i))));
     }
     if (failures === jobs.length && jobs.length > 0 && round === 0) {
       throw new PipelineError(`every researcher failed in round ${round}`, this.cost);
@@ -515,8 +592,14 @@ class PipelineRun {
   /**
    * Keeps only claims whose quote appears in a snapshot taken in this run, fixes
    * a claim's URL to the page that snapshot came from, and makes ids unique.
+   *
+   * Every accepted claim is in the research log: a claim the researcher returned
+   * without calling log_claim gets its `claim` row here (marked as logged by the
+   * pipeline), and one note per call records the claim set the drafter receives
+   * (ids, favors, confidence, source type, impact), so the admin can trace any
+   * fact back to its claim.
    */
-  private async acceptClaims(claims: ResearchClaim[], scope: string, round: number): Promise<ResearchClaim[]> {
+  private async acceptClaims(claims: ResearchClaim[], scope: string, round: number, tools?: ResearchTools): Promise<ResearchClaim[]> {
     const taken = new Set(this.claims.map((c) => c.id));
     const out: ResearchClaim[] = [];
     const dropped: string[] = [];
@@ -543,7 +626,59 @@ class PipelineRun {
     if (dropped.length) {
       await this.note(`Dropped ${dropped.length} claim(s) from ${scope} that could not be verified against this run's snapshots: ${dropped.join('; ')}`, round, scope);
     }
+    if (out.length) {
+      const agent = tools?.caller.agent ?? (scope === RECORDS_SCOPE ? this.agents.recordsResearcher.name : this.agents.researcher.name);
+      const logged = (c: ResearchClaim) =>
+        (tools?.claims ?? []).some((l) => l.snapshot_id === c.snapshot_id && normalizeForMatch(l.quote) === normalizeForMatch(c.quote));
+      const unlogged = out.filter((c) => !logged(c));
+      for (const c of unlogged) {
+        const snap = this.store.get(c.snapshot_id);
+        await this.store.log.append({
+          agent,
+          scope,
+          round,
+          kind: 'claim',
+          url: c.url,
+          title: snap?.title || c.source_title,
+          snapshot_id: c.snapshot_id,
+          excerpt: c.quote,
+          claims: [{ id: c.id, text: c.text, quote: c.quote, logged_by: 'pipeline', why: 'returned by the researcher without a log_claim call' }],
+        });
+      }
+      await this.store.log.append({
+        agent: PIPELINE_LOG_AGENT,
+        scope,
+        round,
+        kind: 'note',
+        excerpt: clip(
+          `Accepted ${out.length} claim(s) from ${scope} for the drafter: ${out.map((c) => c.id).join(', ')}.` +
+            (unlogged.length ? ` ${unlogged.length} of them had no log_claim entry; the pipeline logged them (${unlogged.map((c) => c.id).join(', ')}).` : ''),
+          4000,
+        ),
+        claims: out.map((c) => ({
+          id: c.id,
+          text: c.text,
+          quote: c.quote,
+          snapshot_id: c.snapshot_id,
+          url: c.url,
+          publisher: c.publisher,
+          source_type: c.source_type,
+          source_date: c.source_date,
+          event_date: c.event_date,
+          favors: c.favors,
+          confidence: c.confidence,
+          impact: c.impact,
+        })),
+      });
+    }
     return out;
+  }
+
+  /** Every researcher's last reported gaps, for the drafter, the hard-questions agent and the admin. */
+  private researchGapRefs(): ResearchGapRef[] {
+    return [...this.researchGaps].flatMap(([scope, gaps]) =>
+      gaps.map((g) => ({ scope, description: g.description, blocking: g.blocking, ...(g.search_hint ? { search_hint: g.search_hint } : {}) })),
+    );
   }
 
   private openedRefs(): OpenedSourceRef[] {
@@ -641,29 +776,143 @@ class PipelineRun {
     return { ok: errors.length === 0, errors };
   }
 
-  /** Applies the fact-checker's confidence downgrades (never upgrades) to the draft. */
-  private applyDowngrades(c: DraftCase, rows: FactCheckItem[]): string[] {
+  /**
+   * Applies the fact-checker's confidence downgrades (never upgrades) to the
+   * draft. A row sets an item's label only when its claim is about the item's
+   * own text (a step's headline and body, a fact's text): a row about a detail
+   * that only an extra citation supports does not relabel the whole step. Such
+   * rows come back as `skipped`, for an open issue that asks the admin to check
+   * the label and the citation.
+   */
+  private applyDowngrades(c: DraftCase, rows: FactCheckItem[]): { changes: string[]; skipped: FactCheckItem[] } {
     const changes: string[] = [];
+    const skipped: FactCheckItem[] = [];
     for (const row of rows) {
-      if (!row.confidence_after) continue;
-      const item = row.target.startsWith('fact:')
-        ? c.starting_facts.find((f) => `fact:${f.id}` === row.target)
-        : c.steps.find((s) => s.id === row.target);
+      if (!row.confidence_after || isNotChecked(row)) continue;
+      const fact = row.target.startsWith('fact:') ? c.starting_facts.find((f) => `fact:${f.id}` === row.target) : undefined;
+      const step = fact ? undefined : c.steps.find((s) => s.id === row.target);
+      const item = fact ?? step;
       if (!item) continue;
       const next = weakerConfidence(item.confidence, row.confidence_after);
-      if (next !== item.confidence) {
-        changes.push(`${row.target}: ${item.confidence} -> ${next}`);
-        item.confidence = next;
+      if (next === item.confidence) continue;
+      const text = fact ? fact.text : `${step!.headline} ${step!.body}`;
+      if (!claimConcernsText(row.claim, text)) {
+        skipped.push(row);
+        continue;
+      }
+      changes.push(`${row.target}: ${item.confidence} -> ${next}`);
+      item.confidence = next;
+    }
+    return { changes, skipped };
+  }
+
+  // -------------------------------------------------------------------------
+  // Fact-check coverage
+  // -------------------------------------------------------------------------
+
+  /**
+   * The item-and-source pairs a fact-check pass left unchecked, as failing rows:
+   * a checklist item and cited source with no row; a "supported" (or partly
+   * supported) row when no snapshot of that source was read in the pass; or one
+   * whose quoted passage is not in the source. Pairs with a failing row are
+   * already failures and are not repeated.
+   */
+  private coverageGaps(draft: DraftCase, rows: FactCheckItem[], reads: Set<string>, only?: string[]): FactCheckItem[] {
+    const sources = new Map(draft.sources.map((s) => [s.id, s]));
+    const byPair = new Map<string, FactCheckItem[]>();
+    for (const r of rows) {
+      if (!r.source_id || isNotChecked(r)) continue;
+      const k = pairKey(r.target, r.source_id);
+      byPair.set(k, [...(byPair.get(k) ?? []), r]);
+    }
+    const gaps: FactCheckItem[] = [];
+    for (const t of factCheckTargets(draft)) {
+      if (only && !only.includes(t.target)) continue;
+      for (const sid of new Set(t.source_ids)) {
+        const src = sources.get(sid);
+        if (!src) continue; // the deterministic check fails a source that is not in the list
+        const found = byPair.get(pairKey(t.target, sid)) ?? [];
+        if (found.some((r) => FAILING_VERDICTS.has(r.verdict))) continue;
+        const snaps = this.store.findAllByUrl(src.url);
+        let why: string | undefined;
+        if (!found.length) why = `the fact-checker returned no row for this item against "${sid}"`;
+        else if (!snaps.some((x) => reads.has(x.id))) why = `the fact-checker marked this item ${found[0]!.verdict.replace('_', ' ')} against "${sid}" without reading that source`;
+        else {
+          const quoted = found.filter((r) => r.quote && normalizeForMatch(r.quote).length >= MIN_QUOTE_CHARS);
+          if (quoted.length && !quoted.some((r) => snaps.some((x) => matchQuote(r.quote!, x.text).ok))) {
+            why = `the passage the fact-checker quoted from "${sid}" is not in that source`;
+          }
+        }
+        if (!why) continue;
+        gaps.push({
+          target: t.target,
+          claim: clip(t.text.trim() || t.target, 2000),
+          source_id: sid,
+          verdict: 'uncited',
+          note: clip(`${NOT_CHECKED} ${why}, so nothing confirms the source supports it.`, 2000),
+          ...(t.confidence ? { confidence_before: t.confidence } : {}),
+        });
       }
     }
-    return changes;
+    return gaps;
+  }
+
+  /**
+   * One fact-check pass with its coverage enforced. Pairs the pass left
+   * unchecked (see coverageGaps) get one follow-up call on just those items;
+   * whatever is still unchecked becomes a failing "not checked" row, which
+   * blocks the loop and reaches the admin like any other failure.
+   */
+  private async factCheck(
+    draft: DraftCase,
+    round: number,
+    opts: { share: number; only?: string[]; focus?: string; useReserve?: boolean },
+  ): Promise<FactCheckItem[]> {
+    const sources = this.sourceRefs(draft);
+    const used: ResearchTools[] = [];
+    const reads = () => new Set(used.flatMap((t) => [...t.reads, ...t.opens.flatMap((o) => (o.snapshot ? [o.snapshot.id] : []))]));
+    const summarize = (o: FactCheckerOutput) => {
+      const by = new Map<string, number>();
+      for (const r of o.rows) by.set(r.verdict, (by.get(r.verdict) ?? 0) + 1);
+      return `${o.rows.length} rows: ${[...by].map(([v, n]) => `${n} ${v}`).join(', ') || 'none'}.`;
+    };
+    const input = (only?: string[], focus?: string): FactCheckerInput => ({ draft, sources, ...(only ? { only } : {}), ...(focus ? { focus } : {}) });
+    const first = await this.call(this.agents.factChecker, input(opts.only, opts.focus), round, {
+      share: opts.share,
+      ...(opts.useReserve ? { useReserve: true } : {}),
+      summarize,
+      onTools: (t) => used.push(t),
+    });
+    let rows = first.rows;
+    let gaps = this.coverageGaps(draft, rows, reads(), opts.only);
+    if (gaps.length) {
+      const targets = [...new Set(gaps.map((g) => g.target))];
+      const pairs = gaps.map((g) => `${g.target} against ${g.source_id}`);
+      await this.note(`The fact-checker left ${gaps.length} item-and-source pair(s) unchecked in round ${round} (${clip(pairs.join('; '), 1500)}); asking it to check them.`, round);
+      try {
+        const again = await this.call(
+          this.agents.factChecker,
+          input(targets, `not yet checked against every cited source: ${clip(pairs.join('; '), 1500)}`),
+          round,
+          { share: Math.max(1, opts.share), ...(opts.useReserve ? { useReserve: true } : {}), summarize, onTools: (t) => used.push(t) },
+        );
+        const redone = new Set(again.rows.filter((r) => r.source_id).map((r) => pairKey(r.target, r.source_id)));
+        rows = [...rows.filter((r) => !(r.source_id && redone.has(pairKey(r.target, r.source_id)))), ...again.rows];
+        gaps = this.coverageGaps(draft, rows, reads(), opts.only);
+      } catch (e) {
+        if (e instanceof PipelineError || this.deps.signal?.aborted) throw e;
+        await this.note(`The follow-up fact-check failed (${(e as Error).message}); ${gaps.length} pair(s) stay unchecked and count as failures.`, round);
+      }
+      if (gaps.length) await this.note(`${gaps.length} item-and-source pair(s) remain unchecked after the follow-up and count as failures.`, round);
+    }
+    return [...rows, ...gaps];
   }
 
   // -------------------------------------------------------------------------
   // The critic loop
   // -------------------------------------------------------------------------
 
-  private async critique(draft: DraftCase, round: number, previousQuestions: HardQuestion[]): Promise<RoundCritique> {
+  private async critique(draft: DraftCase, round: number, previousQuestions: HardQuestion[], previous?: RoundCritique): Promise<RoundCritique> {
     const sides = this.outline.sides;
     // Spend caps for the parallel critics, as shares of what is left: the fact-checker reads every cited
     // source and gets the largest share; the hard-questions agent has no tools and gets the smallest.
@@ -686,7 +935,12 @@ class PipelineRun {
         'hard_questions',
         this.call(
           this.agents.hardQuestions,
-          { draft, must_answer: this.outline.must_answer, ...(previousQuestions.length ? { previous: previousQuestions } : {}) },
+          {
+            draft,
+            must_answer: this.outline.must_answer,
+            ...(previousQuestions.length ? { previous: previousQuestions } : {}),
+            ...(this.researchGapRefs().length ? { research_gaps: this.researchGapRefs() } : {}),
+          },
           round,
           {
             share: share(weight.hard),
@@ -696,22 +950,13 @@ class PipelineRun {
           },
         ),
       ),
-      settle(
-        'fact_checker',
-        this.call(this.agents.factChecker, { draft, sources }, round, {
-          share: share(weight.fact),
-          summarize: (o) => {
-            const by = new Map<string, number>();
-            for (const r of o.rows) by.set(r.verdict, (by.get(r.verdict) ?? 0) + 1);
-            return `${o.rows.length} rows: ${[...by].map(([v, n]) => `${n} ${v}`).join(', ') || 'none'}.`;
-          },
-        }),
-      ),
-      // Each red team is a fresh call that sees the draft JSON and the snapshot list, nothing else.
+      settle('fact_checker', this.factCheck(draft, round, { share: share(weight.fact) })),
+      // Each red team is a fresh call that sees the draft JSON, the snapshot list and its own flags on the
+      // previous draft (to re-raise those that still apply), nothing else: never the drafter's reasoning.
       ...sides.map((side) =>
         settle(
           `red_team (${side.id})`,
-          this.call(this.agents.redTeam, { draft: structuredClone(draft), side, sources }, round, {
+          this.call(this.agents.redTeam, { draft: structuredClone(draft), side, sources, ...this.previousFlags(previous, side) }, round, {
             scope: side.id,
             share: share(weight.red),
             summarize: (o) => `${o.flags.length} flags (${o.flags.filter((f) => f.severity === 'high').length} high). ${o.summary}`,
@@ -727,11 +972,18 @@ class PipelineRun {
         const out = reds[i] as RedTeamOutput | undefined;
         return { side, ...(out ? { out } : {}), flags: (out?.flags ?? []).map((flag) => ({ flag })) };
       }),
-      factRows: (fc as FactCheckerOutput | undefined)?.rows ?? [],
+      factRows: (fc as FactCheckItem[] | undefined) ?? [],
       citations: checkCitations(draft, this.store),
       validationErrors: validation.errors,
       failedCritics: failed,
+      skippedDowngrades: [],
     };
+  }
+
+  /** A red team's own flags on the previous draft (without anyone's resolution), for it to re-raise or drop. */
+  private previousFlags(previous: RoundCritique | undefined, side: OutlineSide): { previous_flags?: RedTeamFlag[] } {
+    const flags = previous?.redTeams.find((t) => t.side.id === side.id)?.flags.map((f) => f.flag) ?? [];
+    return flags.length ? { previous_flags: flags } : {};
   }
 
   private blocking(r: RoundCritique): Blocking {
@@ -747,7 +999,7 @@ class PipelineRun {
   }
 
   /** Sends what needs new facts back to the researchers: per side when the item names one, else to the records researcher. */
-  private routeGaps(b: Blocking): { side?: OutlineSide; gaps: GapInput[] }[] {
+  private routeGaps(b: Blocking, r: RoundCritique): { side?: OutlineSide; gaps: GapInput[] }[] {
     const bySide = new Map<string, GapInput[]>();
     const push = (sideId: string | undefined, g: GapInput) => {
       const key = sideId && this.outline.sides.some((s) => s.id === sideId) ? sideId : RECORDS_SCOPE;
@@ -772,6 +1024,26 @@ class PipelineRun {
         blocking: true,
       });
     }
+    // A research round is running anyway: the researchers that run also get the open non-blocking questions
+    // and gaps that belong to them, and their own earlier gaps, so nothing is left unasked (at most 6 each).
+    if (bySide.size) {
+      const extra = new Map<string, GapInput[]>();
+      const add = (sideId: string | undefined, g: GapInput) => {
+        const key = sideId && this.outline.sides.some((s) => s.id === sideId) ? sideId : RECORDS_SCOPE;
+        if (!bySide.has(key)) return;
+        const list = extra.get(key) ?? [];
+        if (list.length < 6) extra.set(key, [...list, g]);
+      };
+      const taken = new Set([...bySide.values()].flat().map((g) => g.id).filter(Boolean));
+      for (const g of r.hard?.gaps.filter((x) => !x.blocking) ?? []) if (!taken.has(g.id)) add(g.side_id, { ...g, blocking: false });
+      for (const q of r.hard?.questions.filter((x) => !x.blocking && x.status === 'open') ?? []) {
+        if (!taken.has(q.id)) add(q.side_id, { id: q.id, description: q.question, ...(q.side_id ? { side_id: q.side_id } : {}), blocking: false });
+      }
+      for (const [scope, gaps] of this.researchGaps) {
+        for (const g of gaps) if (!taken.has(g.id)) add(scope === RECORDS_SCOPE ? undefined : scope, { ...g, description: `Not found in the last search: ${g.description}` });
+      }
+      for (const [key, gaps] of extra) bySide.set(key, [...bySide.get(key)!, ...gaps]);
+    }
     return [...bySide].map(([key, gaps]) => {
       const side = this.outline.sides.find((s) => s.id === key);
       return { ...(side ? { side } : {}), gaps };
@@ -784,8 +1056,9 @@ class PipelineRun {
       hard_questions: r.hard?.questions.map((q) => ({ ...q, round: r.round })) ?? [],
       gaps: r.hard?.gaps ?? [],
       bias_reports: r.redTeams.filter((t) => t.out).map((t) => ({ side_id: t.side.id, summary: t.out!.summary, flags: t.out!.flags })),
+      // Rows for pairs the fact-checker did not check give the drafter and editor nothing to fix; they still block.
       fact_check: [
-        ...r.factRows.filter((row) => row.verdict !== 'supported'),
+        ...r.factRows.filter((row) => row.verdict !== 'supported' && !isNotChecked(row)),
         ...r.citations.map((f) => ({ ...f, note: `Deterministic check: ${f.note}` })),
       ],
       notes: [...r.validationErrors.map((e) => `Validator: ${e}`), ...r.failedCritics.map((f) => `Critic failed: ${f}`)],
@@ -829,6 +1102,11 @@ class PipelineRun {
           `Question: ${o.question.prompt} Sides: ${o.sides.map((s) => s.label).join(' / ')}. ${o.must_answer.length} must-answer items; ` +
           `content warning: ${o.content_warning ?? 'none'}.`,
       });
+      // Every new case must say where the story stands on the as-of date, so a draft cannot stop at an older stage.
+      const status = statusItem(this.asOf);
+      if (!this.outline.must_answer.includes(status)) {
+        this.outline = { ...this.outline, must_answer: [...this.outline.must_answer.slice(0, MAX_MUST_ANSWER - 1), status] };
+      }
       // A scoper that could not open one usable page could not identify the case: the researchers would only
       // spend the budget guessing. Stop here and say so.
       if (this.store.opened().length === 0) {
@@ -881,11 +1159,13 @@ class PipelineRun {
         ...(this.base ? { base: this.base } : {}),
         ...(request.kind === 'revision' ? { instructions: request.instructions } : {}),
         ...this.updateInput(),
+        ...(this.researchGapRefs().length ? { research_gaps: this.researchGapRefs() } : {}),
       },
       0,
       { summarize: (o) => this.draftSummary(o) },
     );
     for (const r of first.resolutions) this.resolutions.set(r.ref, r.resolution);
+    this.drafterGaps = first.research_gaps;
     let draft = this.prepare(first.case);
     let lastValid: DraftCase | undefined = this.validation(draft).ok ? draft : undefined;
     // What the last research-and-redraft pass cost, to judge whether another round is affordable.
@@ -901,12 +1181,20 @@ class PipelineRun {
       let r: RoundCritique;
       try {
         const previous = [...questions.values()].map((q) => this.questionForReview(q));
-        r = await this.critique(draft, round, previous);
+        r = await this.critique(draft, round, previous, rounds[rounds.length - 1]);
       } catch (e) {
         if (!(e instanceof BudgetExhaustedError)) throw e;
         budgetStop = true;
         await this.note(`Stopped before the critics of round ${round}: ${e.message}.`, round);
         break;
+      }
+      // A flag of the previous round that this round's red team (shown it) raised again is still open.
+      const prev = rounds[rounds.length - 1];
+      for (const t of prev?.redTeams ?? []) {
+        const now = r.redTeams.find((x) => x.side.id === t.side.id);
+        if (!now?.out) continue;
+        const ids = new Set(now.flags.map((f) => f.flag.id));
+        for (const f of t.flags) f.reraised = ids.has(f.flag.id);
       }
       rounds.push(r);
       for (const q of r.hard?.questions ?? []) {
@@ -914,7 +1202,15 @@ class PipelineRun {
         questions.set(q.id, { item: q, firstRound: prev?.firstRound ?? round, lastRound: round, ...(prev?.drafterResolution ? { drafterResolution: prev.drafterResolution } : {}) });
       }
       const downgrades = this.applyDowngrades(draft, r.factRows);
-      if (downgrades.length) await this.note(`Applied the fact-checker's confidence downgrades: ${downgrades.join('; ')}`, round);
+      r.skippedDowngrades = downgrades.skipped;
+      if (downgrades.changes.length) await this.note(`Applied the fact-checker's confidence downgrades: ${downgrades.changes.join('; ')}`, round);
+      if (downgrades.skipped.length) {
+        await this.note(
+          `Did not apply ${downgrades.skipped.length} downgrade(s) whose claim is not in the item's headline and body: ` +
+            downgrades.skipped.map((x) => `${x.target} [${x.source_id ?? '-'}] -> ${x.confidence_after}`).join('; '),
+          round,
+        );
+      }
 
       const b = this.blocking(r);
       const n = blockingCount(b);
@@ -946,7 +1242,7 @@ class PipelineRun {
 
       try {
         const redraftStart = this.cost;
-        const jobs = this.routeGaps(b);
+        const jobs = this.routeGaps(b, r);
         if (jobs.length) await this.research(round, jobs);
         const revised = await this.call(
           this.agents.drafter,
@@ -958,6 +1254,7 @@ class PipelineRun {
             critique: this.critiquesFor(r),
             ...(request.kind === 'revision' ? { instructions: request.instructions } : {}),
             ...this.updateInput(),
+            ...(this.researchGapRefs().length ? { research_gaps: this.researchGapRefs() } : {}),
           },
           round,
           { summarize: (o) => this.draftSummary(o) },
@@ -965,6 +1262,7 @@ class PipelineRun {
         redraftCost = this.cost - redraftStart;
         this.recordResolutions(revised.resolutions, r, questions);
         for (const x of revised.resolutions) this.resolutions.set(x.ref, x.resolution);
+        this.drafterGaps = revised.research_gaps;
         draft = this.prepare(revised.case);
         if (this.validation(draft).ok) lastValid = draft;
       } catch (e) {
@@ -1000,6 +1298,7 @@ class PipelineRun {
     const openBefore = clean || !last ? [] : this.unresolvedIssues(last, draft);
     let final = draft;
     let editorFallback = false;
+    let finalCheck: (FinalCheck & { case: DraftCase }) | undefined;
     const draftFailures = new Set(checkCitations(draft, this.store).map(failureKey));
     const editRound = Math.max(rounds.length, 0);
     try {
@@ -1008,15 +1307,29 @@ class PipelineRun {
         {
           draft,
           critiques: last ? this.critiquesFor(last) : {},
-          openIssues: [...this.issues, ...openBefore].map((o, i) => ({ id: `oi-${i + 1}`, ...o })),
+          openIssues: [...this.issues, ...openBefore].map(({ target: _t, ...o }: DraftIssue, i) => ({ id: `oi-${i + 1}`, ...o })),
           ...(this.live ? { unchanged: this.unchangedItems(draft) } : {}),
+          newCase: request.kind === 'new_case',
         },
         editRound,
         { useReserve: true, summarize: (o) => o.notes.join(' ') || 'No changes.' },
       );
-      const candidate = this.prepare(edited.case);
-      const v = this.validation(candidate);
-      const newFailures = checkCitations(candidate, this.store).filter((f) => !draftFailures.has(failureKey(f)));
+      for (const x of edited.resolutions) this.editorResolutions.set(x.ref, { action: x.action, text: x.resolution });
+      let candidate = this.prepare(edited.case);
+      // The question is the measure every reader's answer is compared on: only a new case's editor may reword it.
+      if (request.kind !== 'new_case' && !deepEqual(candidate.question, draft.question)) {
+        candidate.question = structuredClone(draft.question);
+        await this.note('The editor changed the question of an existing case; the change was undone.', editRound);
+      }
+      let v = this.validation(candidate);
+      let newFailures = checkCitations(candidate, this.store).filter((f) => !draftFailures.has(failureKey(f)));
+      if (v.ok && newFailures.length === 0) {
+        // Nothing the editor wrote ships unchecked: its changes are fact-checked again, and a failing change is reverted.
+        finalCheck = await this.finalCheck(draft, candidate, editRound);
+        candidate = finalCheck.case;
+        v = this.validation(candidate);
+        newFailures = checkCitations(candidate, this.store).filter((f) => !draftFailures.has(failureKey(f)));
+      }
       if (v.ok && newFailures.length === 0) {
         final = candidate;
       } else {
@@ -1045,6 +1358,21 @@ class PipelineRun {
       if (!lastValid) throw new PipelineError('no draft passed schema validation', this.cost);
       final = lastValid;
       editorFallback = true;
+    }
+    if (editorFallback) finalCheck = undefined;
+
+    // Sources must be opened before they are cited: a source with no snapshot (never opened in this run, and
+    // not archived from the version being revised) leaves the package with everything that cites it.
+    final = await this.dropUnopenedSources(final, editRound);
+    // House style is checked on the text that ships, not only shown to the editor.
+    this.houseStyleIssues(final);
+    if (rounds.length === 0) {
+      this.issues.push({
+        source: 'pipeline',
+        severity: 'high',
+        description: 'No critic round ran (no hard questions, red teams or fact-check by the agents): only the deterministic citation check has seen this draft.',
+        resolved: false,
+      });
     }
 
     // 6. A live update that ends up changing nothing but its as-of date is not worth a review; otherwise its
@@ -1085,8 +1413,12 @@ class PipelineRun {
 
     // 7. Review record and package.
     const finalFailures = checkCitations(final, this.store);
+    const unopened = finalFailures.filter((f) => f.verdict === 'source_unavailable');
+    if (unopened.length) {
+      throw new PipelineError(`the package still cites sources never opened in this run: ${unopened.map((f) => `${f.target} (${f.note})`).join('; ')}`, this.cost);
+    }
     // Only the editor's own version gets the "edited after the finding" note; a fallback is not the editor's text.
-    const review = this.assembleReview(final, rounds, questions, clean, finalFailures, editorFallback ? final : draft);
+    const review = this.assembleReview(final, rounds, questions, clean, finalFailures, editorFallback ? final : draft, finalCheck);
     const doc = { ...final, status: 'in_review' as const, review };
     const checked = validateCase(doc);
     if (!checked.ok || !checked.case) {
@@ -1187,6 +1519,282 @@ class PipelineRun {
         used_step_ids: this.base.steps.map((s) => s.id),
       },
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // After the editor
+  // -------------------------------------------------------------------------
+
+  /**
+   * What the editor changed in each checkable item, against the last critiqued
+   * draft: starting facts and steps whose text, sources or evidence differ (or
+   * that are new), depth layers that differ (or are new), and steelmen. A
+   * changed label, order or `favors` alone is not a content change.
+   */
+  private editedTargets(draft: DraftCase, candidate: DraftCase): string[] {
+    const key = (x: unknown) => JSON.stringify(x ?? null);
+    const out: string[] = [];
+    const facts = new Map(draft.starting_facts.map((f) => [f.id, f]));
+    for (const f of candidate.starting_facts) {
+      const d = facts.get(f.id);
+      if (!d || key([f.text, f.source_ids, f.evidence]) !== key([d.text, d.source_ids, d.evidence])) out.push(`fact:${f.id}`);
+    }
+    const steps = new Map(draft.steps.map((x) => [x.id, x]));
+    for (const st of candidate.steps) {
+      const d = steps.get(st.id);
+      if (!d || key([st.headline, st.body, st.source_ids, st.evidence]) !== key([d.headline, d.body, d.source_ids, d.evidence])) out.push(st.id);
+      const layers = new Map((d?.depth ?? []).map((l) => [l.id, l]));
+      for (const l of st.depth) if (key(l) !== key(layers.get(l.id))) out.push(`layer:${st.id}/${l.id}`);
+    }
+    const sides = new Map(draft.sides.map((x) => [x.id, x]));
+    for (const side of candidate.sides) if (sides.get(side.id)?.steelman !== side.steelman) out.push(`side:${side.id}`);
+    return out;
+  }
+
+  /**
+   * The fact-check of the editor's version. The editor works after the last
+   * critic round, so:
+   * - it may not raise a confidence label above what the critiqued draft has
+   *   (that label already carries the fact-checker's downgrades);
+   * - every item it changed is fact-checked again (with the same coverage rule);
+   *   an item that fails is put back as the critiqued draft had it (or removed,
+   *   when the editor added it), and the admin is told;
+   * - when that check cannot run (budget, failure), each changed item becomes an
+   *   open issue saying it was not re-checked.
+   */
+  private async finalCheck(draft: DraftCase, editorCase: DraftCase, round: number): Promise<FinalCheck & { case: DraftCase }> {
+    const candidate = structuredClone(editorCase);
+    // 1. No upgrades.
+    const clamped: string[] = [];
+    const clamp = (target: string, item: { confidence: DraftCase['steps'][number]['confidence'] }, before: DraftCase['steps'][number]['confidence'] | undefined) => {
+      if (!before) return;
+      const next = weakerConfidence(item.confidence, before);
+      if (next !== item.confidence) {
+        clamped.push(`${target}: ${item.confidence} -> ${next}`);
+        item.confidence = next;
+      }
+    };
+    for (const f of candidate.starting_facts) clamp(`fact:${f.id}`, f, draft.starting_facts.find((x) => x.id === f.id)?.confidence);
+    for (const st of candidate.steps) clamp(st.id, st, draft.steps.find((x) => x.id === st.id)?.confidence);
+    if (clamped.length) await this.note(`The editor raised confidence labels the fact-check had set; kept the fact-checked labels: ${clamped.join('; ')}.`, round);
+
+    const result: FinalCheck & { case: DraftCase } = {
+      case: candidate,
+      edited: this.editedTargets(draft, candidate),
+      ran: false,
+      passed: new Set(),
+      reverted: new Map(),
+      rows: [],
+      skippedDowngrades: [],
+    };
+    if (!result.edited.length) return result;
+
+    // 2. Re-check what changed.
+    let rows: FactCheckItem[];
+    try {
+      rows = await this.factCheck(candidate, round, {
+        share: 1,
+        useReserve: true,
+        only: result.edited,
+        focus: 'the editor changed these items after the last fact-check',
+      });
+    } catch (e) {
+      if (e instanceof PipelineError || this.deps.signal?.aborted) throw e;
+      const msg = (e as Error).message;
+      await this.note(`The fact-check of the editor's changes did not run (${msg}); ${result.edited.length} changed item(s) go to the admin unchecked.`, round);
+      for (const t of result.edited) {
+        const step = stepIdOf(t, candidate);
+        this.issues.push({
+          source: 'editor',
+          severity: 'medium',
+          description: clip(`The editor changed ${t} after the last fact-check, and the fact-check of its changes did not run (${msg}): check this item against its sources.`, 2000),
+          ...(step ? { step_id: step } : {}),
+          resolved: false,
+          target: t,
+        });
+      }
+      return result;
+    }
+    result.ran = true;
+    result.rows = rows.map((r) => ({ ...r, note: clip(`${FINAL_CHECK} ${r.note ?? ''}`.trim(), 2000) }));
+
+    // 3. Keep what passed, put back what failed.
+    const citationFailures = checkCitations(candidate, this.store);
+    for (const t of result.edited) {
+      const bad = [
+        ...rows.filter((r) => r.target === t && FAILING_VERDICTS.has(r.verdict)).map((r) => `${r.verdict}${r.note ? `: ${r.note}` : ''}`),
+        ...citationFailures.filter((f) => f.target === t).map((f) => `${f.verdict}: ${f.note}`),
+      ];
+      if (bad.length) result.reverted.set(t, clip(bad.join(' / '), 600));
+      else result.passed.add(t);
+    }
+    for (const [t, why] of result.reverted) this.revertItem(candidate, draft, t, why, round);
+    const downgrades = this.applyDowngrades(
+      candidate,
+      rows.filter((r) => result.passed.has(r.target)),
+    );
+    result.skippedDowngrades = downgrades.skipped;
+    if (downgrades.changes.length) await this.note(`Applied the final fact-check's downgrades: ${downgrades.changes.join('; ')}`, round);
+    await this.note(
+      `Fact-checked the editor's changes: ${result.passed.size} of ${result.edited.length} changed item(s) supported` +
+        (result.reverted.size ? `; put back ${[...result.reverted.keys()].join(', ')} as the last checked draft had them.` : '.'),
+      round,
+    );
+    result.case = result.reverted.size ? this.prepare(candidate) : candidate;
+    return result;
+  }
+
+  /** Puts one item of the editor's version back as the critiqued draft had it (removing it when the editor added it). */
+  private revertItem(candidate: DraftCase, draft: DraftCase, target: string, why: string, round: number) {
+    const restoreSources = (ids: string[]) => {
+      for (const id of ids) {
+        if (candidate.sources.some((x) => x.id === id)) continue;
+        const src = draft.sources.find((x) => x.id === id);
+        if (src) candidate.sources.push(structuredClone(src));
+      }
+    };
+    const citedBy = (item: Partial<Pick<DraftCase, 'starting_facts' | 'steps'>>) =>
+      [...citedSourceIds({ starting_facts: [], steps: [], ...item } as unknown as DraftCase)];
+    let what: string;
+    if (target.startsWith('fact:')) {
+      const id = target.slice(5);
+      const before = draft.starting_facts.find((f) => f.id === id);
+      const at = candidate.starting_facts.findIndex((f) => f.id === id);
+      if (before && at >= 0) {
+        candidate.starting_facts[at] = structuredClone(before);
+        restoreSources(citedBy({ starting_facts: [before] }));
+        what = 'put back as the last fact-checked draft had it';
+      } else {
+        candidate.starting_facts = candidate.starting_facts.filter((f) => f.id !== id);
+        what = 'removed (the editor added it)';
+      }
+    } else if (target.startsWith('layer:')) {
+      const [stepId, layerId] = target.slice(6).split('/');
+      const st = candidate.steps.find((x) => x.id === stepId);
+      if (!st) return;
+      const before = draft.steps.find((x) => x.id === stepId)?.depth.find((l) => l.id === layerId);
+      const at = st.depth.findIndex((l) => l.id === layerId);
+      if (at < 0) return;
+      if (before) {
+        st.depth[at] = structuredClone(before);
+        restoreSources(citedBy({ steps: [{ ...st, source_ids: [], evidence: [], depth: [before] }] }));
+        what = 'put back as the last fact-checked draft had it';
+      } else {
+        st.depth.splice(at, 1);
+        what = 'removed (the editor added it)';
+      }
+    } else if (target.startsWith('side:')) {
+      const id = target.slice(5);
+      const before = draft.sides.find((x) => x.id === id);
+      const side = candidate.sides.find((x) => x.id === id);
+      if (!before || !side) return;
+      side.steelman = before.steelman;
+      what = 'put back as the last fact-checked draft had it';
+    } else {
+      const before = draft.steps.find((x) => x.id === target);
+      const at = candidate.steps.findIndex((x) => x.id === target);
+      if (at < 0) return;
+      if (before) {
+        candidate.steps[at] = { ...structuredClone(before), order: candidate.steps[at]!.order };
+        restoreSources(citedBy({ steps: [before] }));
+        what = 'put back as the last fact-checked draft had it';
+      } else {
+        candidate.steps.splice(at, 1);
+        candidate.steps.forEach((x, i) => (x.order = i + 1));
+        what = 'removed (the editor added it)';
+      }
+    }
+    const step = stepIdOf(target, candidate);
+    this.issues.push({
+      source: 'editor',
+      severity: 'medium',
+      description: clip(`The editor's change to ${target} failed the fact-check of its changes (${why}), so it was ${what}.`, 2000),
+      ...(step ? { step_id: step } : {}),
+      resolved: false,
+      target,
+    });
+    void this.note(`Reverted the editor's change to ${target}: ${why}`, round).catch(() => {});
+  }
+
+  /**
+   * Removes every source that has no snapshot in the store (never opened in
+   * this run, and not archived from the version being revised), with its
+   * citations, evidence and depth layers. A step or starting fact left with no
+   * source is removed too. Each removal is a high open issue; a case that no
+   * longer validates fails the run rather than ship.
+   */
+  private async dropUnopenedSources(c: DraftCase, round: number): Promise<DraftCase> {
+    const ghosts = new Map(c.sources.filter((x) => this.store.findAllByUrl(x.url).length === 0).map((x) => [x.id, x]));
+    if (!ghosts.size) return c;
+    const out = structuredClone(c);
+    const keep = (ids: string[] | undefined) => (ids ?? []).filter((id) => !ghosts.has(id));
+    const removed: string[] = [];
+    out.starting_facts = out.starting_facts.filter((f) => {
+      f.source_ids = keep(f.source_ids);
+      f.evidence = f.evidence?.filter((e) => !ghosts.has(e.source_id));
+      if (f.source_ids.length) return true;
+      removed.push(`fact:${f.id} ("${clip(f.text, 120)}")`);
+      return false;
+    });
+    out.steps = out.steps.filter((st) => {
+      st.source_ids = keep(st.source_ids);
+      st.evidence = st.evidence?.filter((e) => !ghosts.has(e.source_id));
+      st.depth = st.depth.flatMap((l): DraftCase['steps'][number]['depth'] => {
+        if (l.kind === 'document' || l.kind === 'quote') return ghosts.has(l.source_id) ? [] : [l];
+        if (l.kind === 'context') {
+          const ids = keep(l.source_ids);
+          return ids.length ? [{ ...l, source_ids: ids }] : [];
+        }
+        const entries = l.entries.map((e) => ({ ...e, source_ids: keep(e.source_ids) })).filter((e) => e.source_ids.length);
+        return entries.length ? [{ ...l, entries }] : [];
+      });
+      if (st.source_ids.length) return true;
+      removed.push(`${st.id} ("${clip(st.headline, 120)}")`);
+      return false;
+    });
+    out.steps.forEach((st, i) => (st.order = i + 1));
+    out.sources = out.sources.filter((x) => !ghosts.has(x.id));
+    const list = [...ghosts.values()].map((g) => `${g.id} (${g.url})`).join('; ');
+    await this.note(`Removed ${ghosts.size} source(s) that were cited but never opened: ${list}.${removed.length ? ` Items left with no source were removed: ${removed.join('; ')}.` : ''}`, round);
+    for (const g of ghosts.values()) {
+      this.issues.push({
+        source: 'fact_checker',
+        severity: 'high',
+        description: clip(`Source "${g.id}" (${g.url}) was cited but never opened in this run, so it and every citation, evidence quote and layer that relied on it were removed from the package.`, 2000),
+        resolved: false,
+      });
+    }
+    for (const r of removed) {
+      this.issues.push({
+        source: 'fact_checker',
+        severity: 'high',
+        description: clip(`Removed ${r}: it cited only sources that were never opened in this run.`, 2000),
+        resolved: false,
+      });
+    }
+    const v = this.validation(out);
+    if (!v.ok) {
+      throw new PipelineError(
+        `the draft cites sources that were never opened (${list}), and without them it is not a valid case: ${v.errors.slice(0, 5).join('; ')}`,
+        this.cost,
+      );
+    }
+    return out;
+  }
+
+  /** A medium open issue for each user-facing text that still uses a judging word (house style). */
+  private houseStyleIssues(c: DraftCase) {
+    for (const { path, words } of judgingWordReport(c)) {
+      const m = /^steps\.(\d+)\./.exec(path);
+      const step = m ? c.steps[Number(m[1])]?.id : undefined;
+      this.issues.push({
+        source: 'editor',
+        severity: 'medium',
+        description: clip(`House style: ${path} still uses judging word(s) ${words.map((w) => `"${w}"`).join(', ')}; replace them with plain words.`, 2000),
+        ...(step ? { step_id: step } : {}),
+        resolved: false,
+      });
+    }
   }
 
   private draftSummary(o: DrafterOutput): string {

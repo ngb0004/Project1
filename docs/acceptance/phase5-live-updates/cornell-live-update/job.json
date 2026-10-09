@@ -1,0 +1,22 @@
+{
+    "id": "173ad8ae-4707-437c-8be4-ce07e69de795",
+    "kind": "update",
+    "status": "no_changes",
+    "case_id": "42c9e096-170e-40c4-a88d-3f6d541e0ad3",
+    "base_version": 1,
+    "created_by": "admin-test@sia.local",
+    "attempts": 1,
+    "claimed_by": "p5-acceptance-live-cornell",
+    "spent_usd": 0.3406,
+    "result": {
+        "since": "2026-10-08",
+        "summary": "No material developments since 2026-10-08 (version 1): the researchers found no verifiable claims. Nothing was drafted or submitted.",
+        "cost_usd": 0.3406,
+        "base_version": 1,
+        "sources_opened": 0,
+        "research_log_rows": 12
+    },
+    "error": null,
+    "created_at": "2026-10-09T06:37:15.014199+00:00",
+    "finished_at": "2026-10-09T06:37:55.263385+00:00"
+}

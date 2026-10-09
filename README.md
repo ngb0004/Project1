@@ -126,6 +126,9 @@ Run the database suites one package at a time; they share one local database.
 
 ## Deploying
 
+The concrete steps for the owner's Supabase and Expo projects are in
+[`docs/DEPLOY.md`](docs/DEPLOY.md).
+
 1. **Supabase.** Create a project, enable the `pg_cron` and `pg_jsonschema`
    extensions, then `npx supabase link` and `npx supabase db push`. In Auth
    settings, turn off new signups (email and password sign-in stays on). Create

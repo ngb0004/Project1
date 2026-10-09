@@ -111,6 +111,6 @@ export async function playThrough(api: DiveApi, doc: PublicCase, deviceId = 'dev
   await press(testIds.next);
 
   const card = await screen.findByTestId(testIds.shareCard);
-  expect(within(card).getByText(`https://dive.test/case/${doc.slug}`)).toBeOnTheScreen();
+  expect(within(card).getByText(new RegExp(`^https://dive\\.test/s/${doc.slug}\\?b=\\d+&a=\\d+$`))).toBeOnTheScreen();
   return { card, share };
 }

@@ -157,7 +157,7 @@ describe.each(fixtures.map((d) => [d.slug, d] as const))('%s on react-native-web
 
     const card = await find(testIds.shareCard);
     expect(card.textContent).toContain('I started at 61.');
-    expect(card.textContent).toContain(`https://dive.test/case/${doc.slug}`);
+    expect(card.textContent).toContain(`https://dive.test/s/${doc.slug}?b=61&a=61`);
     await click(testIds.shareButton);
     expect(share).toHaveBeenCalledWith(expect.objectContaining({ view: card }));
     await find(testIds.shareDownload);

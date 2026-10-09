@@ -165,3 +165,53 @@ export function caseUrl(baseUrl: string, slug: string): string {
   const base = /^[a-z][a-z0-9+.-]*:\/*$/i.test(baseUrl) ? baseUrl.replace(/:\/*$/, '://') : `${baseUrl.replace(/\/+$/, '')}/`;
   return `${base}case/${encodeURIComponent(slug)}`;
 }
+
+/** A spot on the main scale in words: "Agree", "Leaning agree", "In the middle". */
+export function positionText(value: number, leftLabel: string, rightLabel: string): string {
+  if (value <= 20) return leftLabel;
+  if (value < 45) return `Leaning ${leftLabel.toLowerCase()}`;
+  if (value <= 55) return 'In the middle';
+  if (value < 80) return `Leaning ${rightLabel.toLowerCase()}`;
+  return rightLabel;
+}
+
+/** Where the person who shared a link started and ended on the main question. */
+export interface SharedPosition {
+  before: number;
+  after: number;
+}
+
+const SCALE_VALUE = /^(?:100|[1-9]?\d)$/;
+
+/** Reads ?b=&a= from a shared link; anything but two whole numbers from 0 to 100 is ignored. */
+export function parseSharedPosition(b: unknown, a: unknown): SharedPosition | null {
+  if (typeof b !== 'string' || typeof a !== 'string' || !SCALE_VALUE.test(b) || !SCALE_VALUE.test(a)) return null;
+  return { before: Number(b), after: Number(a) };
+}
+
+/**
+ * The link a reader shares. On the web it goes through /s/<slug>, a small page
+ * that gives link previews a title, text and image, then opens the case with
+ * the sharer's Before and After. App-scheme links go straight to the case.
+ */
+export function shareLink(baseUrl: string, slug: string, from: SharedPosition): string {
+  if (!/^https?:\/\//i.test(baseUrl)) return caseUrl(baseUrl, slug);
+  return `${baseUrl.replace(/\/+$/, '')}/s/${encodeURIComponent(slug)}?b=${from.before}&a=${from.after}`;
+}
+
+const spot = (value: number, left: string, right: string) => `${value} (${positionText(value, left, right)})`;
+
+/** "I started at 80 (Agree) and ended at 30 (Leaning disagree)." */
+export function journeyText(from: SharedPosition, leftLabel: string, rightLabel: string): string {
+  if (from.before === from.after) return `I stayed at ${spot(from.after, leftLabel, rightLabel)} the whole way.`;
+  return `I started at ${spot(from.before, leftLabel, rightLabel)} and ended at ${spot(from.after, leftLabel, rightLabel)}.`;
+}
+
+/** Shown on the case card when someone opens a shared link. */
+export function inviteText(from: SharedPosition, leftLabel: string, rightLabel: string): string {
+  const where =
+    from.before === from.after
+      ? `stayed at ${spot(from.after, leftLabel, rightLabel)} the whole way`
+      : `started at ${spot(from.before, leftLabel, rightLabel)} and ended at ${spot(from.after, leftLabel, rightLabel)}`;
+  return `The person who sent you this ${where}. Where would you land?`;
+}

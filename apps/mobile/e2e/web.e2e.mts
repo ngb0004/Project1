@@ -3,13 +3,15 @@
  *
  *   1. publishes every fixture in /cases/fixtures under a fresh slug with a seed
  *      profile (submitted as the pipeline, seeded and published as the admin);
- *   2. exports the web app pointed at the local stack and serves it with an SPA
- *      fallback;
+ *   2. exports the web app pointed at the local stack and serves it with
+ *      `expo serve`, which also runs the /s/<slug> link-preview route;
  *   3. plays each case end to end in Chromium, checking that no crowd result
  *      reaches the screen (or the network) before its answer is committed,
  *      reloading mid-dive to check that it resumes with answers locked, and
  *      saving screenshots of the key screens;
- *   4. checks that /case/<slug> and /case/<slug>/about load directly.
+ *   4. checks that /case/<slug> and /case/<slug>/about load directly, and that a
+ *      shared /s/<slug>?b=&a= link carries preview tags and opens the case with
+ *      the sharer's Before and After.
  *
  *   pnpm --filter @sia/mobile e2e:web
  *
@@ -24,10 +26,10 @@ import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium, type Browser, type Locator, type Page } from 'playwright';
-import { VOTE_ORDER, VOTE_VALUE, caseUrl, mirrorText, slotsOf, yourVoteText } from '@sia/dive-engine';
+import { VOTE_ORDER, VOTE_VALUE, inviteText, mirrorText, shareLink, slotsOf, yourVoteText } from '@sia/dive-engine';
 import { steelmanId, testIds, versionRowId, voteOptionId } from '@sia/dive-ui/testIds';
 import { ANON_KEY, API_URL, loadFixtures, publishFixtures, serviceClient, type PublishedFixture } from './seed.mjs';
-import { serveStatic } from './serve.mjs';
+import { serveExpo } from './serve.mjs';
 
 const APP_DIR = join(import.meta.dirname, '..');
 const REPO_ROOT = join(APP_DIR, '../..');
@@ -53,16 +55,18 @@ function run(cmd: string, args: string[], env: NodeJS.ProcessEnv): Promise<void>
  * Exports the web app with the local stack baked in. --clear matters: Metro
  * otherwise reuses transforms with older EXPO_PUBLIC_* values inlined.
  */
+const WEB_ENV: NodeJS.ProcessEnv = {
+  ...process.env,
+  CI: '1',
+  EXPO_PUBLIC_SUPABASE_URL: API_URL,
+  EXPO_PUBLIC_SUPABASE_ANON_KEY: ANON_KEY,
+  EXPO_PUBLIC_DEMO_CASES_URL: '',
+  EXPO_PUBLIC_SHARE_BASE_URL: '',
+};
+
 async function buildWeb(outDir: string) {
-  await run('npx', ['expo', 'export', '--platform', 'web', '--output-dir', outDir, '--clear'], {
-    ...process.env,
-    CI: '1',
-    EXPO_PUBLIC_SUPABASE_URL: API_URL,
-    EXPO_PUBLIC_SUPABASE_ANON_KEY: ANON_KEY,
-    EXPO_PUBLIC_DEMO_CASES_URL: '',
-    EXPO_PUBLIC_SHARE_BASE_URL: '',
-  });
-  const jsDir = join(outDir, '_expo/static/js/web');
+  await run('npx', ['expo', 'export', '--platform', 'web', '--output-dir', outDir, '--clear'], WEB_ENV);
+  const jsDir = join(outDir, 'client/_expo/static/js/web');
   const bundles = await Promise.all((await readdir(jsDir)).map((f) => readFile(join(jsDir, f), 'utf8')));
   assert.ok(
     bundles.some((js) => js.includes(API_URL)),
@@ -399,7 +403,7 @@ async function playCase(browser: Browser, base: string, f: PublishedFixture, sho
     const card = id(testIds.shareCard);
     await visible(card);
     const cardText = await card.innerText();
-    for (const part of [`I started at ${before}.`, `I ended at ${after}.`, caseUrl(base, f.slug), doc.title]) {
+    for (const part of [`I started at ${before}.`, `I ended at ${after}.`, shareLink(base, f.slug, { before, after }), doc.title]) {
       assert.ok(cardText.includes(part), `share card is missing ${JSON.stringify(part)}`);
     }
     await capture('05-share-screen', 300);
@@ -461,6 +465,22 @@ async function checkDeepLinks(browser: Browser, base: string, f: PublishedFixtur
     await visible(page.getByText(doc.title, { exact: true }));
     await assertNoCrowd(page, 'deep link');
 
+    // A shared link: preview tags for messengers, then the case greeting with the sharer's Before and After.
+    const shared = `${base}/s/${f.slug}?b=80&a=30`;
+    const preview = await (await fetch(shared)).text();
+    const tag = (key: string) =>
+      new RegExp(`<meta property="${key}" content="([^"]*)">`)
+        .exec(preview)?.[1]
+        ?.replace(/&#(\d+);/g, (_, n: string) => String.fromCharCode(Number(n)));
+    assert.equal(tag('og:title'), doc.title, 'the link preview names the case');
+    assert.match(tag('og:description') ?? '', /^I started at 80 \(.+\) and ended at 30 \(.+\)\./);
+    assert.equal(tag('og:image'), `${base}/og.png`);
+    assert.equal((await fetch(`${base}/og.png`)).headers.get('content-type'), 'image/png');
+    await page.goto(shared);
+    await page.waitForURL(`${base}/case/${f.slug}?b=80&a=30`);
+    const { left_label: left, right_label: right } = doc.question.scale;
+    await visible(id(testIds.invite).getByText(inviteText({ before: 80, after: 30 }, left, right), { exact: true }));
+
     await page.goto(`${base}/case/${f.slug}/about`);
     await visible(id(testIds.transparency));
     const history = id(testIds.versionHistory);
@@ -502,9 +522,10 @@ async function main() {
   const published = await publishFixtures(fixtures);
   for (const f of published) console.log(`published ${f.doc.slug} as /case/${f.slug} (v${f.version})`);
 
-  const distDir = join(work, 'web');
+  // Inside the app: expo serve finds the project by looking upward from the build.
+  const distDir = await mkdtemp(join(APP_DIR, '.e2e-web-'));
   await buildWeb(distDir);
-  const server = await serveStatic(distDir);
+  const server = await serveExpo(distDir, APP_DIR, WEB_ENV);
   const browser = await chromium.launch({ executablePath: process.env.DIVE_E2E_CHROMIUM || undefined });
   const summary: Record<string, unknown>[] = [];
   try {
@@ -530,8 +551,9 @@ async function main() {
   } finally {
     await browser.close();
     await server.close();
+    await rm(distDir, { recursive: true, force: true });
     // Keep the temp dir only when the screenshots live in it.
-    await rm(process.env.DIVE_E2E_SCREENSHOTS ? work : distDir, { recursive: true, force: true });
+    if (!process.env.DIVE_E2E_SCREENSHOTS) await rm(work, { recursive: true, force: true });
   }
   console.log(JSON.stringify({ ok: true, screenshots: shotsDir, cases: summary }, null, 2));
 }

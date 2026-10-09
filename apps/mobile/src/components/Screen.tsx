@@ -3,11 +3,13 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Body, Headline, Kicker, MAX_WIDTH, Small, colors, space } from '@sia/dive-ui';
 import type { Backend } from '@/lib/backend';
+import { GetAppBanner } from './GetAppBanner';
 
 /** Full-screen paper background inside the safe area. */
 export function Screen({ children }: { children: ReactNode }) {
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom', 'left', 'right']}>
+      <GetAppBanner />
       {children}
     </SafeAreaView>
   );

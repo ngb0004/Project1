@@ -5,6 +5,11 @@ import {
   CONFIDENCE_LABEL,
   SHARE_TAGLINE,
   caseUrl,
+  inviteText,
+  journeyText,
+  parseSharedPosition,
+  positionText,
+  shareLink,
   crowdCountText,
   estimateMinutes,
   formatDate,
@@ -148,6 +153,34 @@ describe('share card', () => {
     expect(caseUrl('https://x.test/', 'my-case')).toBe('https://x.test/case/my-case');
     expect(caseUrl('https://x.test//', 'a b')).toBe('https://x.test/case/a%20b');
     expect(caseUrl('dive://', 'my-case')).toBe('dive://case/my-case');
+  });
+
+  it('links through the preview page on the web, carrying Before and After', () => {
+    expect(shareLink('https://x.test/', 'my case', { before: 80, after: 30 })).toBe('https://x.test/s/my%20case?b=80&a=30');
+    expect(shareLink('dive://', 'my-case', { before: 80, after: 30 })).toBe('dive://case/my-case');
+  });
+
+  it('reads only whole numbers from 0 to 100 back out of a link', () => {
+    expect(parseSharedPosition('80', '0')).toEqual({ before: 80, after: 0 });
+    expect(parseSharedPosition('100', '7')).toEqual({ before: 100, after: 7 });
+    for (const [b, a] of [['101', '5'], ['-1', '5'], ['5.5', '5'], ['05', '5'], ['', '5'], [undefined, '5'], [['5'], '5']]) {
+      expect(parseSharedPosition(b, a)).toBeNull();
+    }
+  });
+
+  it('describes a spot on the scale in words', () => {
+    const words = [0, 20, 21, 44, 45, 55, 56, 79, 80, 100].map((v) => positionText(v, 'Disagree', 'Agree'));
+    expect(words).toEqual([
+      'Disagree', 'Disagree', 'Leaning disagree', 'Leaning disagree', 'In the middle',
+      'In the middle', 'Leaning agree', 'Leaning agree', 'Agree', 'Agree',
+    ]);
+    expect(inviteText({ before: 80, after: 30 }, 'Disagree', 'Agree')).toBe(
+      'The person who sent you this started at 80 (Agree) and ended at 30 (Leaning disagree). Where would you land?',
+    );
+    expect(inviteText({ before: 50, after: 50 }, 'Disagree', 'Agree')).toBe(
+      'The person who sent you this stayed at 50 (In the middle) the whole way. Where would you land?',
+    );
+    expect(journeyText({ before: 10, after: 90 }, 'Disagree', 'Agree')).toBe('I started at 10 (Disagree) and ended at 90 (Agree).');
   });
 
   it.each(FIXTURES)('takes its words from the record and its numbers from the final reveal (%s)', async (name) => {

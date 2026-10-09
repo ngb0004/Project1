@@ -9,6 +9,7 @@ import {
   voteKeyOf,
   estimateMinutes,
   formatDate,
+  inviteText,
   isCommitted,
   isFinalReveal,
   isStepReveal,
@@ -17,6 +18,7 @@ import {
   type DiveState,
   type FairnessValue,
   type ShareCardData,
+  type SharedPosition,
   type SlotKey,
   visibleReveal,
 } from '@sia/dive-engine';
@@ -43,9 +45,11 @@ export function CaseCardScreen({
   onBegin,
   starting,
   error,
+  invite = null,
   onOpenTransparency,
 }: {
   doc: PublicCase;
+  invite?: SharedPosition | null;
   acknowledged: boolean;
   onAcknowledge: () => void;
   onBegin: () => void;
@@ -56,6 +60,12 @@ export function CaseCardScreen({
   const needsAck = Boolean(doc.content_warning) && !acknowledged;
   return (
     <>
+      {invite ? (
+        <View style={styles.invite} testID={testIds.invite}>
+          <Kicker>Someone sent you this</Kicker>
+          <Body>{inviteText(invite, doc.question.scale.left_label, doc.question.scale.right_label)}</Body>
+        </View>
+      ) : null}
       <View style={styles.group} testID={testIds.caseCard}>
         <Kicker>Facts as of {formatDate(doc.as_of)}</Kicker>
         <Display>{doc.title}</Display>
@@ -788,6 +798,13 @@ const styles = StyleSheet.create({
   group: { gap: space.sm },
   muted: { color: colors.muted },
   inkKicker: { color: colors.ink },
+  invite: {
+    gap: space.xs,
+    padding: space.md,
+    backgroundColor: colors.paperRaised,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.ink,
+  },
   warning: {
     gap: space.sm,
     padding: space.md,

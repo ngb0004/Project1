@@ -294,7 +294,7 @@ describe.each(fixtures.map((d) => [d.slug, d] as const))('%s', (_slug, doc) => {
     await arrive(testIds.shareScreen);
     const card = screen.getByTestId(testIds.shareCard);
     expect(within(card).getByText(shareHeadline(before, after).replace('. ', '.\n'))).toBeOnTheScreen();
-    expect(within(card).getByText(`https://dive.test/case/${doc.slug}`)).toBeOnTheScreen();
+    expect(within(card).getByText(`https://dive.test/s/${doc.slug}?b=${before}&a=${after}`)).toBeOnTheScreen();
     expect(within(card).getByText('Crowd includes seeded estimates.')).toBeOnTheScreen();
     await press(testIds.shareButton);
     expect(share).toHaveBeenCalledTimes(1);

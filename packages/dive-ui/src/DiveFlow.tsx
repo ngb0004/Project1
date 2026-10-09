@@ -2,7 +2,6 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import { ActivityIndicator, BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AFTER } from '@sia/case-schema';
 import {
-  caseUrl,
   currentScreen,
   currentSlot,
   diveReducer,
@@ -13,11 +12,13 @@ import {
   progress,
   resumeCursor,
   shareCardData,
+  shareLink,
   slotOf,
   stepById,
   type DiveApi,
   type FairnessValue,
   type FlagReason,
+  type SharedPosition,
   type LoadedCase,
   type SlotKey,
 } from '@sia/dive-engine';
@@ -55,6 +56,8 @@ export interface DiveFlowProps {
    */
   shareBaseUrl: string | null;
   services: DiveServices;
+  /** Where the person who shared the link started and ended; the case card then asks where the reader would land. */
+  invite?: SharedPosition | null;
   onExit?: () => void;
   /** Shows "How this dive was made" links when the host can open the transparency page. */
   onOpenTransparency?: () => void;
@@ -179,6 +182,7 @@ function DivePlayer({
   deviceId,
   shareBaseUrl,
   services,
+  invite,
   onExit,
   onOpenTransparency,
   onInProgressChange,
@@ -403,6 +407,7 @@ function DivePlayer({
           onBegin={begin}
           starting={starting}
           error={startError}
+          invite={invite ?? null}
           onOpenTransparency={onOpenTransparency}
         />
       );
@@ -465,8 +470,8 @@ function DivePlayer({
       break;
     case 'share': {
       const final = state.reveals[AFTER];
-      const url = shareBaseUrl ? caseUrl(shareBaseUrl, loaded.slug) : '';
-      const card = final && isFinalReveal(final) ? shareCardData(doc, final, url) : null;
+      const made = final && isFinalReveal(final) ? shareCardData(doc, final, '') : null;
+      const card = made && shareBaseUrl ? { ...made, url: shareLink(shareBaseUrl, loaded.slug, made) } : made;
       body = <ShareScreen card={card} services={services} onDone={onExit} />;
       break;
     }

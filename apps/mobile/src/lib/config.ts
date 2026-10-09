@@ -15,4 +15,7 @@ export const config = {
    * Required for native release builds; see .env.example.
    */
   shareBaseUrl: process.env.EXPO_PUBLIC_SHARE_BASE_URL || null,
+  /** Store pages for the "Get the app" banner on the website; the banner stays hidden until one is set. */
+  iosAppUrl: process.env.EXPO_PUBLIC_IOS_APP_STORE_URL || null,
+  androidAppUrl: process.env.EXPO_PUBLIC_ANDROID_PLAY_URL || null,
 };

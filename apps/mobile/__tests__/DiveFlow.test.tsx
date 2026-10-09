@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
 import type { PublicCase } from '@sia/case-schema';
-import { DiveApiError, shareCardData, type FinalReveal } from '@sia/dive-engine';
+import { DiveApiError, inviteText, shareCardData, type FinalReveal } from '@sia/dive-engine';
 import { DiveFlow, ShareCard, testIds, type DiveProgressStore, type DiveServices } from '@sia/dive-ui';
 import { createFakeApi, type FakeApi } from './fakeApi';
 
@@ -217,13 +217,13 @@ describe('DiveFlow', () => {
     const card = await screen.findByTestId(testIds.shareCard);
     expect(within(card).getByText('I started at 90.\nI ended at 70.')).toBeOnTheScreen();
     expect(within(card).getByText('Find where you break.')).toBeOnTheScreen();
-    expect(within(card).getByText('https://dive.test/case/tiny-case')).toBeOnTheScreen();
+    expect(within(card).getByText('https://dive.test/s/tiny-case?b=90&a=70')).toBeOnTheScreen();
     await press(testIds.shareButton);
     expect(await screen.findByText('Shared.')).toBeOnTheScreen();
     expect(services.share).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'I started at 90. I ended at 70. Find where you break. https://dive.test/case/tiny-case',
-        card: expect.objectContaining({ before: 90, after: 70, url: 'https://dive.test/case/tiny-case' }),
+        text: 'I started at 90. I ended at 70. Find where you break. https://dive.test/s/tiny-case?b=90&a=70',
+        card: expect.objectContaining({ before: 90, after: 70, url: 'https://dive.test/s/tiny-case?b=90&a=70' }),
       }),
     );
 
@@ -311,6 +311,22 @@ describe('DiveFlow', () => {
     await press(testIds.pollCommit);
     const note = await screen.findByTestId(testIds.versionNote);
     expect(note).toHaveTextContent('Updated Oct 12; 3,104 people saw the earlier version.');
+  });
+
+  it('greets a shared link with where the sharer started and ended', async () => {
+    await render(
+      <DiveFlow
+        api={createFakeApi([doc])}
+        slug={doc.slug}
+        deviceId="device-0123456789abcdef"
+        shareBaseUrl="https://dive.test"
+        services={makeServices()}
+        invite={{ before: 80, after: 30 }}
+      />,
+    );
+    const invite = await screen.findByTestId(testIds.invite);
+    const { left_label: left, right_label: right } = doc.question.scale;
+    expect(within(invite).getByText(inviteText({ before: 80, after: 30 }, left, right))).toBeOnTheScreen();
   });
 
   it('shows a plain message for an unknown case', async () => {
@@ -575,7 +591,7 @@ describe('ShareScreen', () => {
     await playToShare(createFakeApi([doc]), services);
     await press(testIds.copyLink);
     expect(await screen.findByTestId(testIds.shareStatus)).toHaveTextContent(/^Couldn't copy the link\./);
-    expect(screen.getByTestId(testIds.shareUrl)).toHaveTextContent('https://dive.test/case/tiny-case');
+    expect(screen.getByTestId(testIds.shareUrl)).toHaveTextContent('https://dive.test/s/tiny-case?b=50&a=50');
     expect(screen.queryByText('Link copied.')).toBeNull();
   });
 

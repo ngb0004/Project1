@@ -17,6 +17,7 @@ export const testIds = {
   notice: 'dive-notice',
   progress: 'dive-progress',
 
+  invite: 'case-invite',
   caseCard: 'case-card',
   contentWarning: 'content-warning',
   contentWarningAck: 'content-warning-ack',

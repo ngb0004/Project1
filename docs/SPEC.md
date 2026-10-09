@@ -178,7 +178,7 @@ A dive is a fixed sequence of screens generated from the case record. The flow i
 6. **How it's being told online.** Each take (left, center, right) in its own voice, with what holds up, what is partly true, what is not backed up, what is false and what is unknown.
 7. **After.** The same statement and slider as the Before screen, starting at the Before answer.
 8. **Final reveal.** The user's before-to-after line over the crowd's before and after distributions. Also shown: the fact the crowd split on most, where the user stood apart from the crowd, and the open questions.
-9. **Share card.** The default is the personal shift card, such as "I started at 95. I ended at 70. Find where you break." It includes a small crowd distribution and a deep link into this case.
+9. **Share card.** The default is the personal shift card, such as "I started at 95. I ended at 70. Find where you break." It includes a small crowd distribution and a deep link into this case. On the web the link goes through a preview page (`/s/<slug>?b=&a=`) so messengers show the case title, the sharer's Before and After and an image; the case then opens with "The person who sent you this started at … and ended at …. Where would you land?"
 
 **Design rules:** editorial and calm, with serif headlines, heavy whitespace, and near-monochrome screens. Accent color and motion appear only in reveals. The crowd result is never visible before the user commits on that step.
 

@@ -23,7 +23,7 @@
       "package": "com.ngb0004.dive"
     },
     "web": {
-      "output": "single",
+      "output": "server",
       "favicon": "./assets/images/dive-favicon.png",
       "name": "Dive",
       "backgroundColor": "#F6F2EA",

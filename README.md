@@ -146,8 +146,15 @@ The concrete steps for the owner's Supabase and Expo projects are in
    queues re-research jobs for live cases on the cadence set in the console.
 4. **Dive app.** Build with EAS, setting `EXPO_PUBLIC_SUPABASE_URL`,
    `EXPO_PUBLIC_SUPABASE_ANON_KEY` and `EXPO_PUBLIC_SHARE_BASE_URL` (the https
-   origin of the web build, so share links open without the app). Host the web
-   export with a fallback to `index.html` so `/case/<slug>` links resolve.
+   origin of the web build, so share links open without the app). The web
+   build uses Expo's server output: `/s/<slug>?b=&a=` is an API route that
+   gives link previews the case title, the sharer's Before and After and
+   `public/og.png`, then opens `/case/<slug>`, which greets the reader with
+   where the sharer landed. API routes read `EXPO_PUBLIC_*` at run time, so set
+   them as EAS environment variables and deploy with
+   `npx expo export --platform web --clear && eas deploy --prod --environment production`.
+   Optional `EXPO_PUBLIC_IOS_APP_STORE_URL` / `EXPO_PUBLIC_ANDROID_PLAY_URL`
+   turn on a "Get the app" banner on the website.
 
 ## Status against the spec
 

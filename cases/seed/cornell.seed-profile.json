@@ -1,0 +1,85 @@
+{
+  "sessions": 400,
+  "before_bins": [
+    2,
+    3,
+    4,
+    6,
+    9,
+    12,
+    14,
+    16,
+    17,
+    17
+  ],
+  "steps": {
+    "interview-vs-statement": {
+      "move_share": 0.35,
+      "mean_shift": 6,
+      "spread": 7
+    },
+    "statement-reviewed-and-signed": {
+      "move_share": 0.25,
+      "mean_shift": -4,
+      "spread": 5
+    },
+    "da-reviewed-statement-only": {
+      "move_share": 0.35,
+      "mean_shift": 6,
+      "spread": 7
+    },
+    "da-legal-reading": {
+      "move_share": 0.35,
+      "mean_shift": -6,
+      "spread": 7
+    },
+    "ithaca-police-not-told": {
+      "move_share": 0.25,
+      "mean_shift": 4,
+      "spread": 5
+    },
+    "title-ix-process": {
+      "move_share": 0.35,
+      "mean_shift": -6,
+      "spread": 7
+    },
+    "sanctions-dispute": {
+      "move_share": 0.2,
+      "mean_shift": 0,
+      "spread": 5
+    },
+    "lawsuit-account-differs": {
+      "move_share": 0.25,
+      "mean_shift": -4,
+      "spread": 5
+    },
+    "faq-revised": {
+      "move_share": 0.25,
+      "mean_shift": 4,
+      "spread": 5
+    },
+    "consent-law-gap": {
+      "move_share": 0.35,
+      "mean_shift": -6,
+      "spread": 7
+    },
+    "governor-replaces-da": {
+      "move_share": 0.35,
+      "mean_shift": 6,
+      "spread": 7
+    },
+    "where-things-stand": {
+      "move_share": 0.15,
+      "mean_shift": 0,
+      "spread": 3
+    }
+  },
+  "after": {
+    "move_share": 0.1,
+    "mean_shift": 0,
+    "spread": 3
+  },
+  "fade_after_real_completions": 500,
+  "rng_seed": 1,
+  "note": "Draft estimate written by the research pipeline for the owner to adjust; seeded rows are flagged as seeded in the app."
+}

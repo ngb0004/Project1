@@ -256,11 +256,21 @@ describe.skipIf(!reachable)('the worker service against the local Supabase stack
       // Pretend the earlier attempts spent most of the budget.
       await sql(`update public.pipeline_jobs set spent_usd = 9.5 where id = $1`, [jobId]);
 
-      // Attempt 2: $9.50 of the $10 budget is gone, so it does not run at all.
+      // Attempt 2: $9.50 of the $10 budget is gone, so it does not run at all. (The claim uses SKIP LOCKED, so
+      // under a parallel test run a momentary lock on the row can make one claim come back empty: try again.)
+      const byId = claimJobById(jobId);
+      const claimSoon: ClaimJob = async (db, w) => {
+        for (let i = 0; i < 20; i++) {
+          const j = await byId(db, w);
+          if (j) return j;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        return null;
+      };
       const second = await runWorkerOnce({
         db: pipeline,
         runner: new FakeRunner(cleanScripts({ scoper: scoperScript(slug) }), { costPerCall: 0.25 }),
-        claim: claimJobById(jobId),
+        claim: claimSoon,
         workerId: WORKER,
         fetcher: fakeFetcher(),
         asOf: AS_OF,

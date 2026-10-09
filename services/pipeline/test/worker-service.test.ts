@@ -276,8 +276,13 @@ describe.skipIf(!reachable)('the worker service against the local Supabase stack
         asOf: AS_OF,
         budgetUsd: 10,
       });
-      expect(second).toMatchObject({ jobId, status: 'failed', error: expect.stringMatching(/budget of \$10\.00 was used up by earlier attempts \(\$9\.50 spent\)/) });
-      expect(Number((await job(jobId)).spent_usd)).toBe(9.5);
+      try {
+        expect(second).toMatchObject({ jobId, status: 'failed', error: expect.stringMatching(/budget of \$10\.00 was used up by earlier attempts \(\$9\.50 spent\)/) });
+        expect(Number((await job(jobId)).spent_usd)).toBe(9.5);
+      } finally {
+        // Never leave a test job in the queue for a real worker to pick up.
+        await sql(`update public.pipeline_jobs set status = 'cancelled' where id = $1 and status = 'queued'`, [jobId]);
+      }
     });
   });
 

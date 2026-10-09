@@ -314,7 +314,9 @@ interface QuestionRecord {
 interface FlagRecord {
   flag: RedTeamFlag;
   drafterResolution?: ResolutionRecord;
-  /** The next round's red team (shown this flag) raised it again. */
+  /** The next round's red team for this side ran (and was shown this flag). */
+  rechecked?: boolean;
+  /** ...and raised it again. */
   reraised?: boolean;
 }
 
@@ -1203,7 +1205,10 @@ class PipelineRun {
         const now = r.redTeams.find((x) => x.side.id === t.side.id);
         if (!now?.out) continue;
         const ids = new Set(now.flags.map((f) => f.flag.id));
-        for (const f of t.flags) f.reraised = ids.has(f.flag.id);
+        for (const f of t.flags) {
+          f.rechecked = true;
+          f.reraised = ids.has(f.flag.id);
+        }
       }
       rounds.push(r);
       for (const q of r.hard?.questions ?? []) {
@@ -1904,8 +1909,9 @@ class PipelineRun {
       const res = f.drafterResolution;
       const parts = [res ? `Drafter (${words(res)}): ${res.text}` : 'The drafter did not respond to this flag.'];
       if (f.reraised) parts.push(`The round ${round + 1} red team raised it again.`);
+      else if (!f.rechecked) parts.push(`The round ${round + 1} red team for this side did not finish, so nobody re-checked it.`);
       else if (res?.action === 'changed') parts.push(`The round ${round + 1} red team did not raise it again.`);
-      const status = res?.action === 'not_applicable' ? 'wont_fix' : res?.action === 'changed' && !f.reraised ? 'addressed' : 'unaddressed';
+      const status = res?.action === 'not_applicable' ? 'wont_fix' : res?.action === 'changed' && f.rechecked && !f.reraised ? 'addressed' : 'unaddressed';
       return { status, resolution: clip(parts.join(' '), 2000) };
     }
     const res = this.editorResolutions.get(f.flag.id);

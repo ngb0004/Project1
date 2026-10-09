@@ -13,6 +13,12 @@
  * pipeline check <case.json> --snapshots <dir>
  *   Validates a saved case and re-runs the citation check against saved snapshots.
  *
+ * pipeline verify <job-id> [--out <dir>]
+ *   Audits a finished job from the database (same env as the worker): the package
+ *   is in the review queue and schema-valid, every source has an HTTP 200 snapshot
+ *   from that job, every quote is in its snapshot, and every agent logged its work.
+ *   With --out, saves the package, research log and snapshots to <dir>.
+ *
  * Models: PIPELINE_MODEL_STRONG / PIPELINE_MODEL_FAST. Budget: --budget-usd or PIPELINE_BUDGET_USD.
  */
 import { realpathSync } from 'node:fs';
@@ -20,10 +26,12 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { signInStaff } from '@sia/case-store';
 import { runCasePipeline, toLocalId } from './orchestrator';
-import { checkSavedPackage, manifestOf, writePackageToDir } from './package';
+import { checkSavedPackage, manifestOf, writeAuditDir, writePackageToDir } from './package';
 import { FileResearchLog } from './research/log';
 import { SourceStore } from './research/store';
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeAgentRunner } from './runner/claude';
+import { verifyJob } from './verify';
 import { runWorker } from './worker';
 
 export const DEFAULT_RUN_BUDGET_USD = 40;
@@ -31,11 +39,24 @@ export const DEFAULT_RUN_BUDGET_USD = 40;
 export const DEFAULT_RUNS_DIR = resolve(import.meta.dirname, '..', '.runs');
 
 const USAGE = `usage:
-  pipeline run --brief "<one line>" [--out <dir>] [--budget-usd N] [--max-rounds N]
-  pipeline worker [--once] [--budget-usd N] [--poll-seconds N]
-  pipeline check <case.json> --snapshots <dir>`;
+  pipeline run --brief "<one line>" [--out <dir>] [--budget-usd N] [--max-rounds N] [--verbose]
+  pipeline worker [--once] [--budget-usd N] [--poll-seconds N] [--verbose]
+  pipeline check <case.json> --snapshots <dir>
+  pipeline verify <job-id> [--out <dir>]`;
 
 const log = (m: string) => process.stderr.write(`${new Date().toISOString().slice(11, 19)} ${m}\n`);
+
+/** With --verbose: one line per tool call an agent makes (search, open, read, claim). */
+function toolTrace(agent: string, msg: SDKMessage): void {
+  if (msg.type !== 'assistant') return;
+  for (const block of msg.message.content) {
+    if (block.type !== 'tool_use') continue;
+    const name = block.name.replace(/^mcp__research__/, '');
+    const input = block.input as Record<string, unknown>;
+    const arg = input.query ?? input.url ?? input.snapshot_id ?? input.phrase ?? '';
+    log(`  ${agent}: ${name} ${String(arg).slice(0, 140)}`);
+  }
+}
 
 function budgetFrom(arg: string | undefined): number {
   const raw = arg ?? process.env.PIPELINE_BUDGET_USD;
@@ -59,6 +80,7 @@ async function cmdRun(argv: string[]): Promise<number> {
       out: { type: 'string' },
       'budget-usd': { type: 'string' },
       'max-rounds': { type: 'string' },
+      verbose: { type: 'boolean' },
     },
   });
   const brief = values.brief?.trim();
@@ -72,7 +94,7 @@ async function cmdRun(argv: string[]): Promise<number> {
   const result = await runCasePipeline(
     { kind: 'new_case', brief },
     {
-      runner: new ClaudeAgentRunner(),
+      runner: new ClaudeAgentRunner(values.verbose ? { onMessage: toolTrace } : {}),
       store,
       runId,
       budgetUsd,
@@ -93,6 +115,7 @@ async function cmdWorker(argv: string[]): Promise<number> {
       once: { type: 'boolean' },
       'budget-usd': { type: 'string' },
       'poll-seconds': { type: 'string' },
+      verbose: { type: 'boolean' },
     },
   });
   const db = await signInStaff(requireEnv('SUPABASE_URL'), requireEnv('SUPABASE_ANON_KEY'), {
@@ -102,12 +125,31 @@ async function cmdWorker(argv: string[]): Promise<number> {
   const abort = new AbortController();
   for (const sig of ['SIGINT', 'SIGTERM'] as const) process.once(sig, () => abort.abort(new Error(`received ${sig}`)));
   const outcomes = await runWorker(
-    { db, runner: new ClaudeAgentRunner(), budgetUsd: budgetFrom(values['budget-usd']), onProgress: log, signal: abort.signal },
+    { db, runner: new ClaudeAgentRunner(values.verbose ? { onMessage: toolTrace } : {}), budgetUsd: budgetFrom(values['budget-usd']), onProgress: log, signal: abort.signal },
     { once: values.once ?? false, pollMs: Number(values['poll-seconds'] ?? 30) * 1000 },
   );
   for (const o of outcomes) process.stdout.write(`${JSON.stringify(o)}\n`);
   if (values.once && outcomes.length === 0) log('no queued jobs');
   return outcomes.some((o) => o.status === 'failed') ? 1 : 0;
+}
+
+async function cmdVerify(argv: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: { out: { type: 'string' } } });
+  const jobId = positionals[0];
+  if (!jobId) throw new Error('usage: pipeline verify <job-id> [--out <dir>]');
+  const db = await signInStaff(requireEnv('SUPABASE_URL'), requireEnv('SUPABASE_ANON_KEY'), {
+    email: requireEnv('PIPELINE_EMAIL'),
+    password: requireEnv('PIPELINE_PASSWORD'),
+  });
+  const audit = await verifyJob(db, jobId);
+  for (const c of audit.checks) process.stdout.write(`${c.ok ? 'ok  ' : 'FAIL'} ${c.name}: ${c.detail}\n`);
+  if (values.out) {
+    const dir = resolve(values.out);
+    await writeAuditDir(audit, dir);
+    process.stdout.write(`saved to ${dir}\n`);
+  }
+  process.stdout.write(audit.ok ? 'verified\n' : 'not verified\n');
+  return audit.ok ? 0 : 1;
 }
 
 async function cmdCheck(argv: string[]): Promise<number> {
@@ -134,6 +176,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return cmdWorker(rest);
     case 'check':
       return cmdCheck(rest);
+    case 'verify':
+      return cmdVerify(rest);
     default:
       process.stderr.write(`${USAGE}\n`);
       return cmd === undefined || cmd === 'help' || cmd === '--help' ? 0 : 2;

@@ -435,21 +435,29 @@ describe('a planted claim against the deterministic citation check (real fetch, 
 // 2. The orchestrator never lets a planted claim through
 // ---------------------------------------------------------------------------
 
-const SIDE_A_SPECS = [
-  { path: P.minutes, quote: 'The council voted 5-4 to postpone the replacement project to the 2027 budget.', text: 'The council voted 5-4 in June 2025 to postpone the replacement.', type: 'official' as const, favors: SIDE_A.id, impact: 'high' as const },
-  { path: P.inspection, quote: 'Condition rating: poor.', text: 'A 2024 inspection rated the main poor.', type: 'official' as const, favors: SIDE_A.id },
+interface PageClaim {
+  path: string;
+  quote: string;
+  text: string;
+  type: DraftCase['sources'][number]['type'];
+  favors: string;
+  impact?: 'low' | 'medium' | 'high';
+}
+
+const SIDE_A_SPECS: PageClaim[] = [
+  { path: P.minutes, quote: 'The council voted 5-4 to postpone the replacement project to the 2027 budget.', text: 'The council voted 5-4 in June 2025 to postpone the replacement.', type: 'official', favors: SIDE_A.id, impact: 'high' },
+  { path: P.inspection, quote: 'Condition rating: poor.', text: 'A 2024 inspection rated the main poor.', type: 'official', favors: SIDE_A.id },
 ];
-const SIDE_B_SPECS = [
-  { path: P.grants, quote: 'The state reduced local water infrastructure grants by 40 percent for the 2025 fiscal year.', text: 'The state cut water grants by 40 percent in 2025.', type: 'official' as const, favors: SIDE_B.id, impact: 'high' as const },
-  { path: P.analysis, quote: 'Maple County deferred two of its five planned water projects in 2025', text: 'The county deferred two of five water projects in 2025.', type: 'analysis' as const, favors: SIDE_B.id },
+const SIDE_B_SPECS: PageClaim[] = [
+  { path: P.grants, quote: 'The state reduced local water infrastructure grants by 40 percent for the 2025 fiscal year.', text: 'The state cut water grants by 40 percent in 2025.', type: 'official', favors: SIDE_B.id, impact: 'high' },
+  { path: P.analysis, quote: 'Maple County deferred two of its five planned water projects in 2025', text: 'The county deferred two of five water projects in 2025.', type: 'analysis', favors: SIDE_B.id },
 ];
-const RECORDS_SPECS = [
-  { path: P.breaks, quote: 'The Elm Street water main broke on September 12, 2025, closing three blocks for four days.', text: 'The main broke on September 12, 2025.', type: 'news' as const, favors: 'neutral' },
+const RECORDS_SPECS: PageClaim[] = [
+  { path: P.breaks, quote: 'The Elm Street water main broke on September 12, 2025, closing three blocks for four days.', text: 'The main broke on September 12, 2025.', type: 'news', favors: 'neutral' },
 ];
 
 /** Researcher scripts that open the fixture pages through the tools (the real fetch) and log their claims. */
-const researching = (specs: Array<(typeof SIDE_A_SPECS)[number] | (typeof RECORDS_SPECS)[number]>) =>
-  researcherScript(specs.map(({ path, ...s }) => ({ ...s, url: url(path) })));
+const researching = (specs: PageClaim[]) => researcherScript(specs.map(({ path, ...s }) => ({ ...s, url: url(path) })));
 
 /** A fact-checker that marks every item supported without reading anything: the worst case for an LLM. */
 const rubberStampFactChecker: FakeScript = (input: FactCheckerInput): FactCheckerOutput => ({

@@ -6,6 +6,7 @@ import { checkCitations, type CitationFailure } from './factcheck';
 import type { PipelinePackage } from './orchestrator';
 import { MemoryResearchLog, type SnapshotRecord } from './research/log';
 import { SourceStore } from './research/store';
+import type { JobAudit } from './verify';
 
 /**
  * The package writer: a directory for offline runs, or the review queue through
@@ -153,6 +154,23 @@ export async function checkSavedPackage(casePath: string, snapshotDir: string): 
   store.load(records);
   const failures = checkCitations((v.case ?? raw) as Parameters<typeof checkCitations>[0], store);
   return { ok: v.ok && failures.length === 0, schemaErrors: v.errors, failures, snapshots: store.opened().length };
+}
+
+/**
+ * Saves what `pipeline verify` read back from the database: the case, its review
+ * record, the job, the audit, the research log (JSONL) and every snapshot.
+ */
+export async function writeAuditDir(audit: JobAudit, dir: string): Promise<void> {
+  await mkdir(join(dir, PACKAGE_FILES.snapshots), { recursive: true });
+  const { doc, logRows, snapshots, job, ...rest } = audit;
+  if (doc) {
+    await writeFile(join(dir, PACKAGE_FILES.case), json(doc));
+    await writeFile(join(dir, PACKAGE_FILES.review), json(doc.review));
+  }
+  await writeFile(join(dir, 'job.json'), json(job));
+  await writeFile(join(dir, 'audit.json'), json(rest));
+  await writeFile(join(dir, 'research-log.jsonl'), logRows.map((r) => JSON.stringify(r)).join('\n') + (logRows.length ? '\n' : ''));
+  for (const s of snapshots) await writeFile(join(dir, PACKAGE_FILES.snapshots, `${s.id}.json`), json(s));
 }
 
 export interface SubmitOptions {

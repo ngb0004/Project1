@@ -565,7 +565,11 @@ class PipelineRun {
 
   private async critique(draft: DraftCase, round: number, previousQuestions: HardQuestion[]): Promise<RoundCritique> {
     const sides = this.outline.sides;
-    const share = sides.length + 2;
+    // Spend caps for the parallel critics, as shares of what is left: the fact-checker reads every cited
+    // source and gets the largest share; the hard-questions agent has no tools and gets the smallest.
+    const weight = { hard: 0.5, fact: 3, red: 1 };
+    const total = weight.hard + weight.fact + weight.red * sides.length;
+    const share = (w: number) => total / w;
     const failed: string[] = [];
     const settle = async <T>(name: string, p: Promise<T>): Promise<T | undefined> => {
       try {
@@ -585,7 +589,7 @@ class PipelineRun {
           { draft, must_answer: this.outline.must_answer, ...(previousQuestions.length ? { previous: previousQuestions } : {}) },
           round,
           {
-            share,
+            share: share(weight.hard),
             summarize: (o) =>
               `${o.questions.length} questions (${o.questions.filter((q) => q.blocking && q.status === 'open').length} blocking and open), ` +
               `${o.gaps.length} gaps (${o.gaps.filter((g) => g.blocking).length} blocking). Most moving fact: ${o.most_moving_fact}`,
@@ -595,7 +599,7 @@ class PipelineRun {
       settle(
         'fact_checker',
         this.call(this.agents.factChecker, { draft, sources }, round, {
-          share,
+          share: share(weight.fact),
           summarize: (o) => {
             const by = new Map<string, number>();
             for (const r of o.rows) by.set(r.verdict, (by.get(r.verdict) ?? 0) + 1);
@@ -609,7 +613,7 @@ class PipelineRun {
           `red_team (${side.id})`,
           this.call(this.agents.redTeam, { draft: structuredClone(draft), side, sources }, round, {
             scope: side.id,
-            share,
+            share: share(weight.red),
             summarize: (o) => `${o.flags.length} flags (${o.flags.filter((f) => f.severity === 'high').length} high). ${o.summary}`,
           }),
         ),

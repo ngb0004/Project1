@@ -317,6 +317,20 @@ describe('runCasePipeline (new case)', () => {
     expect(pkg.review.open_issues).toEqual([expect.objectContaining({ source: 'pipeline', description: expect.stringMatching(/council-not-responsible.*error_max_turns.*1 claim/) })]);
   });
 
+  it('does not start a round the budget cannot cover, and keeps a reserve so the editor still runs', async () => {
+    // $1 a call on a $12 budget ($1.20 kept for the editor): scoper, 3 researchers and the drafter cost $5, round 1's
+    // four critics $4. Another round would cost about $6 (a redraft plus the critics) with $1.80 left, so the loop stops.
+    const { result, runner } = await run(cleanScripts({ hard_questions: blockingHardQuestions }), { budgetUsd: 12, costPerCall: 1 });
+    const pkg = asPackage(result);
+    expect(pkg.rounds).toBe(1);
+    expect(runner.callsTo('drafter')).toHaveLength(1);
+    expect(runner.callsTo('editor')).toHaveLength(1);
+    expect(pkg.editorFallback).toBe(false);
+    expect(pkg.costUsd).toBe(10);
+    expect(pkg.review.open_issues).toContainEqual(expect.objectContaining({ source: 'pipeline', description: expect.stringMatching(/budget .* did not cover another round after 1 critic round/) }));
+    expect(pkg.review.open_issues).toContainEqual(expect.objectContaining({ source: 'hard_questions', severity: 'high' }));
+  });
+
   it('stops the loop when the run budget is used up and says so', async () => {
     const { result } = await run(cleanScripts({ hard_questions: blockingHardQuestions }), { budgetUsd: 0.12, costPerCall: 0.01 });
     const pkg = asPackage(result);

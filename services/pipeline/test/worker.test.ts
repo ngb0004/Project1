@@ -17,7 +17,15 @@ import {
 // way supabase/scripts/create-staff-user.ts does). The worker itself only ever
 // receives the signed-in pipeline client.
 import { ANON_KEY, API_URL, pool, sql, userClient } from '../../../supabase/tests/helpers';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { checkCitations } from '../src/factcheck';
+import { checkSavedPackage, writeAuditDir } from '../src/package';
+import { MemoryResearchLog } from '../src/research/log';
+import { SourceStore } from '../src/research/store';
 import { FakeRunner, type FakeScript } from '../src/runner/fake';
+import { verifyJob } from '../src/verify';
 import { runWorkerOnce } from '../src/worker';
 import { AS_OF, SIDE_A, SIDE_B, URLS, cleanScripts, fakeFetcher, researcherScript, scoperScript } from './helpers';
 
@@ -47,8 +55,12 @@ describe.skipIf(!reachable)('pipeline worker against the local Supabase stack', 
 
   beforeAll(async () => {
     [admin, pipeline] = await Promise.all([userClient('admin'), userClient('pipeline')]);
-    // The worker claims the oldest queued job: leave none from other test files in the way.
-    await sql(`update public.pipeline_jobs set status = 'cancelled' where status in ('queued', 'running')`);
+    // The worker claims the oldest queued job (or a stale running one): leave none from other test files in the
+    // way. A job another worker is running right now (fresh heartbeat) is left alone.
+    await sql(
+      `update public.pipeline_jobs set status = 'cancelled'
+        where status = 'queued' or (status = 'running' and heartbeat_at < now() - interval '30 minutes')`,
+    );
   });
   afterAll(() => pool.end());
 
@@ -87,6 +99,27 @@ describe.skipIf(!reachable)('pipeline worker against the local Supabase stack', 
     // Every source in the case was opened by this job.
     const opened = await researchLogOpenedUrls(admin, jobId, doc.sources.map((s) => s.url));
     expect([...opened].sort()).toEqual(doc.sources.map((s) => s.url).sort());
+
+    // `pipeline verify` proves the same from the database alone, as the pipeline account...
+    const audit = await verifyJob(pipeline, jobId);
+    expect(audit.checks.filter((c) => !c.ok)).toEqual([]);
+    expect(audit.ok).toBe(true);
+    expect(audit.quotesChecked).toBeGreaterThan(0);
+    // ...and the package it saves passes `pipeline check` offline.
+    const dir = await mkdtemp(join(tmpdir(), 'pipeline-verify-'));
+    await writeAuditDir(audit, dir);
+    const saved = await checkSavedPackage(join(dir, 'case.json'), join(dir, 'snapshots'));
+    expect(saved).toMatchObject({ ok: true, failures: [], schemaErrors: [] });
+  });
+
+  it('the snapshots verify reads back from the database catch a tampered quote', async () => {
+    const [v] = await listStaffVersions(admin, caseId);
+    const tampered = structuredClone(v!.doc);
+    tampered.steps[0]!.evidence = [{ source_id: tampered.steps[0]!.source_ids[0]!, quote: 'A sentence that no opened page ever contained.' }];
+    const audit = await verifyJob(pipeline, v!.pipeline_job_id!);
+    const store = new SourceStore({ log: new MemoryResearchLog() });
+    store.load(audit.snapshots);
+    expect(checkCitations(tampered, store)).toEqual([expect.objectContaining({ target: tampered.steps[0]!.id, verdict: 'unsupported' })]);
   });
 
   it('runs a revision from the admin\'s notes against that version and supersedes it', async () => {
